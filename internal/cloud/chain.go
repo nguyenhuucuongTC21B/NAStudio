@@ -1,0 +1,265 @@
+package cloud
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"sync"
+	"time"
+)
+
+// PState trạng thái runtime của 1 dịch vụ trong chuỗi.
+type PState struct {
+	Status         string `json:"status"` // unknown|ok|err|quota|skip
+	Err            string `json:"err,omitempty"`
+	ExhaustedUntil string `json:"exhaustedUntil,omitempty"` // "2006-01-02" — cạn tới hết ngày
+	CountToday     int    `json:"countToday,omitempty"`
+	Day            string `json:"day,omitempty"`
+	CooldownUntil  int64  `json:"cooldownUntil,omitempty"` // unix — lỗi thường, tránh 5 phút
+	LastOKAt       string `json:"lastOKAt,omitempty"`
+}
+
+// Snapshot toàn bộ trạng thái chuỗi — persist vào settings để lần mở app
+// sau vẫn nhớ dịch vụ nào cạn lượt hôm nay.
+type Snapshot struct {
+	Providers map[string]*PState `json:"providers"`
+	LastGood  string             `json:"lastGood,omitempty"`
+}
+
+// Chain chuỗi cầu nối có nhớ trạng thái.
+type Chain struct {
+	mu    sync.Mutex
+	snap  Snapshot
+	nowFn func() time.Time // injection cho test
+	reg   []Desc           // nil → Registry() (test có thể thay)
+}
+
+// NewChain dựng chuỗi từ snapshot đã lưu (JSON rỗng = mới tinh).
+func NewChain(savedJSON string) *Chain {
+	c := &Chain{nowFn: time.Now}
+	c.snap.Providers = map[string]*PState{}
+	if savedJSON != "" {
+		var s Snapshot
+		if err := json.Unmarshal([]byte(savedJSON), &s); err == nil && s.Providers != nil {
+			c.snap = s
+			if c.snap.Providers == nil {
+				c.snap.Providers = map[string]*PState{}
+			}
+		}
+	}
+	return c
+}
+
+// SnapshotJSON xuất trạng thái để persist.
+func (c *Chain) SnapshotJSON() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	b, _ := json.Marshal(c.snap)
+	return string(b)
+}
+
+func (c *Chain) today() string { return c.nowFn().Format("2006-01-02") }
+
+// state lấy trạng thái của 1 dịch vụ, tự reset bộ đếm sang ngày mới.
+func (c *Chain) state(id string) *PState {
+	st, ok := c.snap.Providers[id]
+	if !ok {
+		st = &PState{Status: "unknown"}
+		c.snap.Providers[id] = st
+	}
+	if st.Day != c.today() {
+		st.Day = c.today()
+		st.CountToday = 0
+		st.ExhaustedUntil = ""
+	}
+	return st
+}
+
+func (c *Chain) exhausted(id string) bool {
+	st := c.state(id)
+	return st.ExhaustedUntil == c.today()
+}
+
+func (c *Chain) cooling(id string) bool {
+	st := c.state(id)
+	return st.CooldownUntil > c.nowFn().Unix()
+}
+
+// StatusOf trả trạng thái hiển thị của 1 dịch vụ (đọc từ ngoài).
+func (c *Chain) StatusOf(id string) PState {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	st := c.state(id)
+	cp := *st
+	return cp
+}
+
+// LastGoodID dịch vụ thành công gần nhất (ưu tiên đứng đầu lần sau).
+func (c *Chain) LastGoodID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.snap.LastGood
+}
+
+// Synthesize chạy cầu nối: đi qua registry đúng thứ tự, bỏ qua dịch vụ
+// cạn lượt/lỗi cooldown/không hỗ trợ, gọi từng cái cho tới khi có audio.
+func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv func(Event)) (Result, error) {
+	if hc == nil {
+		hc = newHTTP()
+	}
+	reg := c.reg
+	if reg == nil {
+		reg = Registry()
+	}
+	total := len(reg)
+	started := time.Now()
+	tried := 0
+	var lastErr error
+
+	for i, d := range reg {
+		if ctx.Err() != nil {
+			return Result{}, ctx.Err()
+		}
+		basePct := float64(i) / float64(total) * 90
+
+		if d.SkipReason != "" {
+			c.mu.Lock()
+			c.state(d.ID).Status = "skip"
+			c.mu.Unlock()
+			emitEv(onEv, Event{Phase: "skip", ProviderID: d.ID, Label: d.Label,
+				Message: "Bỏ qua " + d.Label + " — " + d.SkipReason, Pct: basePct,
+				ElapsedSec: time.Since(started).Seconds()})
+			continue
+		}
+		if c.exhausted(d.ID) {
+			emitEv(onEv, Event{Phase: "quota", ProviderID: d.ID, Label: d.Label,
+				Message: d.Label + " đã hết lượt hôm nay — chuyển dịch vụ kế tiếp.", Pct: basePct,
+				ElapsedSec: time.Since(started).Seconds()})
+			continue
+		}
+		if c.cooling(d.ID) && c.snap.LastGood != d.ID {
+			emitEv(onEv, Event{Phase: "skip", ProviderID: d.ID, Label: d.Label,
+				Message: d.Label + " vừa lỗi gần đây — tạm thử dịch vụ khác trước.", Pct: basePct,
+				ElapsedSec: time.Since(started).Seconds()})
+			continue
+		}
+
+		tried++
+		label := fmt.Sprintf("%s (%d/%d)", d.Label, i+1, total)
+		emitEv(onEv, Event{Phase: "trying", ProviderID: d.ID, Label: d.Label,
+			Message: "Đang gửi tới " + label + "…", Pct: basePct + 2,
+			ElapsedSec: time.Since(started).Seconds()})
+
+		res, err := callProvider(ctx, hc, d, r, func(ev gradioEvent) {
+			// heartbeat/process_starts của gradio → nhích % để người dùng
+			// thấy app còn sống (chống cảm giác "đứng im").
+			if onEv != nil && (ev.name == "heartbeat" || ev.name == "process_starts" || ev.name == "process_generating") {
+				msg := "Đang chờ " + label + " tổng hợp…"
+				if ev.name == "process_starts" {
+					msg = "Đang tổng hợp trên " + label + "…"
+				} else if ev.name == "process_generating" {
+					msg = "Đang nhận kết quả từ " + label + "…"
+				}
+				creep := basePct + 2 + minF(6, time.Since(started).Seconds()/30)
+				emitEv(onEv, Event{Phase: "waiting", ProviderID: d.ID, Label: d.Label,
+					Message: msg, Pct: creep, ElapsedSec: time.Since(started).Seconds()})
+			}
+		})
+
+		if err == nil {
+			c.mu.Lock()
+			st := c.state(d.ID)
+			st.Status = "ok"
+			st.Err = ""
+			st.CooldownUntil = 0
+			st.CountToday++
+			st.LastOKAt = c.nowFn().Format("15:04:05")
+			c.snap.LastGood = d.ID
+			c.mu.Unlock()
+			res.Tried = tried
+			res.DurationSec = 0
+			emitEv(onEv, Event{Phase: "done", ProviderID: d.ID, Label: d.Label,
+				Message: "Thành công qua " + d.Label, Pct: 92,
+				ElapsedSec: time.Since(started).Seconds()})
+			return res, nil
+		}
+
+		lastErr = err
+		if IsQuota(err) {
+			c.mu.Lock()
+			st := c.state(d.ID)
+			st.Status = "quota"
+			st.Err = err.Error()
+			st.ExhaustedUntil = c.today()
+			c.mu.Unlock()
+			emitEv(onEv, Event{Phase: "quota", ProviderID: d.ID, Label: d.Label,
+				Message: d.Label + " hết lượt — tự động chuyển dịch vụ kế tiếp.", Pct: basePct + 4,
+				ElapsedSec: time.Since(started).Seconds()})
+			continue
+		}
+		if IsWake(err) && ctx.Err() == nil {
+			// space đang ngủ — đợi rồi thử ĐÚNG dịch vụ đó lại 1 lần
+			emitEv(onEv, Event{Phase: "waiting", ProviderID: d.ID, Label: d.Label,
+				Message: d.Label + " đang khởi động (cold start) — đợi ~25s rồi thử lại…",
+				Pct:     basePct + 3, ElapsedSec: time.Since(started).Seconds()})
+			select {
+			case <-time.After(WakeRetryDelay):
+			case <-ctx.Done():
+				return Result{}, ctx.Err()
+			}
+			res, err = callProvider(ctx, hc, d, r, nil)
+			if err == nil {
+				c.mu.Lock()
+				st := c.state(d.ID)
+				st.Status, st.Err, st.CooldownUntil, st.CountToday = "ok", "", 0, st.CountToday+1
+				c.snap.LastGood = d.ID
+				c.mu.Unlock()
+				res.Tried = tried
+				emitEv(onEv, Event{Phase: "done", ProviderID: d.ID, Label: d.Label,
+					Message: "Thành công qua " + d.Label + " (sau khi đánh thức)", Pct: 92,
+					ElapsedSec: time.Since(started).Seconds()})
+				return res, nil
+			}
+		}
+
+		// lỗi thường → cooldown ngắn, chuyển tiếp
+		until := c.nowFn().Add(ErrCooldown).Unix()
+		c.mu.Lock()
+		st := c.state(d.ID)
+		st.Status, st.Err, st.CooldownUntil = "err", err.Error(), until
+		c.mu.Unlock()
+		emitEv(onEv, Event{Phase: "fail", ProviderID: d.ID, Label: d.Label,
+			Message: d.Label + " lỗi: " + err.Error() + " — chuyển dịch vụ kế tiếp.",
+			Pct:     basePct + 4, ElapsedSec: time.Since(started).Seconds()})
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("không còn dịch vụ online nào khả dụng trong chuỗi")
+	}
+	return Result{}, fmt.Errorf("tất cả dịch vụ online đều không thành công (đã thử %d). Lỗi cuối: %w", tried, lastErr)
+}
+
+func callProvider(ctx context.Context, hc *http.Client, d Desc, r Request, onEv func(gradioEvent)) (Result, error) {
+	switch d.Kind {
+	case "vieneuio":
+		return synthVieneuIO(ctx, hc, d, r)
+	case "gradio":
+		return synthGradio(ctx, hc, d, r, onEv)
+	default:
+		return Result{}, fmt.Errorf("loại dịch vụ chưa hỗ trợ gọi trực tiếp: %s", d.Kind)
+	}
+}
+
+func emitEv(onEv func(Event), ev Event) {
+	if onEv != nil {
+		onEv(ev)
+	}
+}
+
+func minF(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}

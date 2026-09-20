@@ -1,0 +1,922 @@
+/* ui.js — toàn bộ thao tác DOM: dropdown giọng, sliders, transport, toasts… */
+(function () {
+  "use strict";
+  const { bridge, state, actions, subscribe } = window.HC;
+
+  const $ = (sel) => document.querySelector(sel);
+  const els = {};
+  [
+    "engine-pill", "btn-theme", "btn-models", "text-input", "char-count", "eta-chip",
+    "voice-dropdown", "voice-toggle", "voice-panel", "voice-search", "voice-list",
+    "voice-avatar", "voice-current-name", "voice-current-desc", "voice-count-chip",
+    "sl-speed", "sl-pitch", "sl-volume", "out-speed", "out-pitch", "out-volume",
+    "progress-fill", "stage-label", "pct-label", "clock-label",
+    "btn-play", "btn-stop", "btn-export-wav", "btn-export-mp3", "btn-paste", "btn-clear",
+    "setup-overlay", "wiz-dl", "wiz-skip", "dl-progress", "dl-fill", "dl-file",
+    "dl-files-idx", "dl-bytes", "dl-pct", "wiz-size", "toasts",
+    "engine-segmented",
+    // PATCH FIX48: nhập gói ZIP weights từ nguồn riêng
+    "wiz-import",
+    // PATCH FIX46: nhân bản giọng
+    "ref-clone-check", "ref-clone-body", "ref-clone-pick", "ref-clone-name",
+    // PATCH FIX51: chế độ nhẹ RAM (int8)
+    "lightram-check", "lightram-dl", "lightram-note",
+    // PATCH FIX52: chuyển đổi + streaming + hàng đợi + danh sách phát
+    "btn-convert", "wait-label", "btn-open-export", "stream-live-check",
+    "queue-list", "playlist-list", "btn-queue-add", "btn-queue-clear", "queue-count-chip",
+    // PATCH FIX53: chế độ sử dụng online (cầu nối chuyển tiếp)
+    "mode-seg", "btn-mode-offline", "btn-mode-online", "cloud-row",
+    "cloud-voice-select", "btn-cloud-file", "cloud-hint",
+    "cloud-panel-list", "btn-cloud-refresh", "cloud-card",
+  ].forEach((id) => { els[id] = document.getElementById(id); });
+
+  /* ---------- helpers ---------- */
+  const fmtTime = (ms) => {
+    const total = Math.max(0, Math.round(ms / 1000));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+  };
+  const setProgress = (pct) => {
+    pct = Math.max(0, Math.min(100, pct || 0));
+    els["progress-fill"].style.setProperty("--w", pct + "%");
+    els["progress-fill"].classList.toggle("active", pct > 0 && pct < 100);
+    els["pct-label"].textContent = Math.round(pct) + "%";
+  };
+
+  /* ---------- THEME ---------- */
+  function applyTheme() {
+    let dark;
+    if (state.themeMode === "auto") dark = state.isDarkWin;
+    else dark = state.themeMode === "dark";
+    document.documentElement.classList.toggle("dark", dark);
+    renderIconsFor(els["btn-theme"], state.themeMode === "auto"
+      ? (dark ? ICONS.moon : ICONS.sun)
+      : (dark ? ICONS.moon : ICONS.sun));
+  }
+  const renderIconsFor = (el, svgHtml) => { if (el) el.innerHTML = svgHtml; };
+
+  /* ---------- VOICE DROPDOWN ---------- */
+  function voiceAvatarClass(v) {
+    return "v-avatar " + (v.gender === "female" ? "female" : v.gender === "male" ? "male" : "unknown");
+  }
+  function renderVoiceList() {
+    const q = (els["voice-search"].value || "").trim().toLowerCase();
+    const list = els["voice-list"];
+    list.innerHTML = "";
+
+    // group theo region đúng thứ tự Bắc → Trung → Nam → Hệ thống
+    const order = ["Bắc", "Trung", "Nam", "Hệ thống"];
+    const groups = new Map();
+    state.voices.forEach((v) => {
+      if (!groups.has(v.region)) groups.set(v.region, []);
+      groups.get(v.region).push(v);
+    });
+
+    [...groups.entries()]
+      .sort((a, b) => (order.indexOf(a[0]) + 99) % 999 - (order.indexOf(b[0]) + 99) % 999)
+      .forEach(([region, voices]) => {
+        const matched = voices.filter((v) =>
+          !q || v.name.toLowerCase().includes(q) ||
+          v.description.toLowerCase().includes(q));
+        if (!matched.length) return;
+
+        const head = document.createElement("div");
+        head.className = "region-head";
+        head.textContent = region === "Hệ thống" ? "GIỌNG HỆ THỐNG · SAPI5" : `MIỀN ${region.toUpperCase()}`;
+        list.appendChild(head);
+
+        matched.forEach((v) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "voice-item" + (v.id === state.voiceId ? " selected" : "")
+            + (v.available ? "" : " badge-unavailable");
+          btn.innerHTML = `
+            <span class="${voiceAvatarClass(v)}">${v.name[0]}</span>
+            <span class="vi-meta"><b>${v.name}</b><small>${v.description}</small></span>
+            ${v.engine === "neural" ? '<span class="badge-engine neural">NEURAL</span>'
+                                    : '<span class="badge-engine">SAPI</span>'}`;
+          btn.addEventListener("click", () => selectVoice(v.id));
+          list.appendChild(btn);
+        });
+      });
+
+    els["voice-count-chip"].textContent =
+      `${state.voices.filter((v) => v.available).length} giọng khả dụng`;
+  }
+
+  function syncVoiceSummary() {
+    const v = state.voices.find((x) => x.id === state.voiceId);
+    if (!v) return;
+    els["voice-current-name"].textContent = v.name;
+    els["voice-current-desc"].textContent = v.description;
+    els["voice-avatar"].className = voiceAvatarClass(v);
+    els["voice-avatar"].textContent = v.name[0];
+    renderVoiceList();
+  }
+
+  function selectVoice(id) {
+    actions.patch({ voiceId: id });
+    closeDropdown();
+    actions.saveDebounced();
+  }
+  function closeDropdown() {
+    els["voice-dropdown"].classList.remove("open");
+  }
+  function wireDropdown() {
+    els["voice-toggle"].addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = !els["voice-dropdown"].classList.contains("open");
+      els["voice-dropdown"].classList.toggle("open", open);
+      if (open) {
+        renderVoiceList();
+        setTimeout(() => els["voice-search"].focus(), 60);
+      }
+    });
+    els["voice-search"].addEventListener("input", renderVoiceList);
+    els["voice-panel"].addEventListener("click", (e) => e.stopPropagation());
+    document.addEventListener("click", closeDropdown);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDropdown(); });
+  }
+
+  /* ---------- ENGINE SEGMENTED ---------- */
+  function renderEngineSeg() {
+    els["engine-segmented"].querySelectorAll(".seg-btn").forEach((b) =>
+      b.classList.toggle("active", b.dataset.engine === state.enginePref));
+  }
+  function wireEngineSeg() {
+    els["engine-segmented"].addEventListener("click", (e) => {
+      const b = e.target.closest(".seg-btn");
+      if (!b) return;
+      actions.patch({ enginePref: b.dataset.engine });
+      renderEngineSeg();
+      actions.saveDebounced();
+    });
+  }
+
+  /* ---------- SLIDERS ---------- */
+  function sliderFill(input) {
+    const min = parseFloat(input.min), max = parseFloat(input.max), v = parseFloat(input.value);
+    input.style.setProperty("--fill-pct", ((v - min) / (max - min) * 100) + "%");
+  }
+  function renderSliders() {
+    [els["sl-speed"], els["sl-pitch"], els["sl-volume"]].forEach(sliderFill);
+
+    els["sl-speed"].value = state.speed;
+    els["sl-pitch"].value = state.pitch;
+    els["sl-volume"].value = Math.round(state.volume * 100);
+
+    els["out-speed"].textContent = state.speed.toFixed(2).replace(/0$/, "") + "×";
+    els["out-pitch"].textContent =
+      (state.pitch > 0 ? "+" : "") + Number(state.pitch).toFixed(1).replace(/\.0$/, "") +
+      " semitone";
+    els["out-volume"].textContent = Math.round(state.volume * 100) + "%";
+
+    [els["sl-speed"], els["sl-pitch"], els["sl-volume"]].forEach(sliderFill);
+  }
+  function wireSliders() {
+    els["sl-speed"].addEventListener("input", () => {
+      actions.patch({ speed: parseFloat(els["sl-speed"].value) });
+      renderSliders(); actions.saveDebounced();
+    });
+    els["sl-pitch"].addEventListener("input", () => {
+      actions.patch({ pitch: parseFloat(els["sl-pitch"].value) });
+      renderSliders(); actions.saveDebounced();
+    });
+    els["sl-volume"].addEventListener("input", () => {
+      actions.patch({ volume: parseFloat(els["sl-volume"].value) / 100 });
+      renderSliders(); actions.saveDebounced();
+    });
+  }
+
+  /* ---------- EDITOR ---------- */
+  function updateCounter() {
+    const n = [...state.text].length; // đếm rune tiếng Việt chuẩn
+    els["char-count"].textContent = n.toLocaleString("vi-VN") + " ký tự";
+    // dự báo thời lượng: ~14–15 ký tự/giây với tốc độ 1×
+    const etaSec = Math.round(n / 15 / Math.max(state.speed, .1));
+    els["eta-chip"].hidden = n < 30;
+    els["eta-chip"].textContent =
+      n >= 30 ? `≈ ${fmtTime(etaSec * 1000)} audio` : "";
+  }
+  function wireEditor() {
+    els["text-input"].addEventListener("input", () => {
+      state.text = els["text-input"].value;
+      updateCounter();
+    });
+    els["btn-clear"].addEventListener("click", () => {
+      els["text-input"].value = "";
+      state.text = "";
+      updateCounter();
+      els["text-input"].focus();
+    });
+    els["btn-paste"].addEventListener("click", async () => {
+      try {
+        const txt = await navigator.clipboard.readText();
+        if (txt) {
+          els["text-input"].value += txt;
+          state.text = els["text-input"].value;
+          updateCounter();
+        }
+      } catch { toast("warn", "Không đọc được clipboard", "Trình duyệt chặn quyền — dán bằng Ctrl+V nhé."); }
+    });
+    els["text-input"].addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        window.HC.ui.convertRequested();
+      }
+    });
+  }
+
+  /* ---------- TRANSPORT ---------- */
+  function renderTransport() {
+    const busy = state.jobBusy || state.playing;
+    // PATCH FIX52: PHÁT = nghe lại KẾT QUẢ; CHUYỂN ĐỔI = tạo giọng nói.
+    els["btn-play"].disabled = !state.lastFinishedJob && !state.playing;
+    els["btn-play"].querySelector(".ico-play").hidden = state.playing && !state.paused;
+    els["btn-play"].querySelector(".ico-pause").hidden = !(state.playing && !state.paused);
+    els["btn-stop"].disabled = !busy;
+    els["btn-export-wav"].disabled = !state.lastFinishedJob;
+    els["btn-export-mp3"].disabled = !state.lastFinishedJob;
+    if (els["btn-convert"]) els["btn-convert"].disabled = state.jobBusy;
+
+    // PATCH FIX52: khi streaming, thanh % vẫn thể hiện TIẾN ĐỘ TỔNG HỢP
+    // (người dùng nhìn thấy phần mềm đang chạy, không tưởng đứng máy).
+    setProgress(state.playing && !state.streaming
+      ? (state.totalMs ? state.cursorMs / state.totalMs * 100 : 0)
+      : state.progressPct);
+    els["stage-label"].textContent = state.stageLabel;
+
+    // PATCH FIX52: đồng hồ chờ — đã chờ bao lâu + dự kiến còn bao lâu.
+    if (els["wait-label"]) {
+      els["wait-label"].textContent = state.jobBusy
+        ? `Đã chờ ${fmtTime((state.elapsedSec || 0) * 1000)}` +
+          (state.etaSec > 0.5 ? ` · còn ~${fmtTime(state.etaSec * 1000)}` : "")
+        : "";
+    }
+
+    if (state.playing) {
+      if (state.streaming) {
+        els["clock-label"].textContent =
+          `${fmtTime(state.cursorMs)} · đang tổng hợp…`;
+      } else if (state.totalMs > 0) {
+        els["clock-label"].textContent =
+          `${fmtTime(state.cursorMs)} / ${fmtTime(state.totalMs)}`;
+      } else {
+        els["clock-label"].textContent = `${fmtTime(state.cursorMs)} / 0:00`;
+      }
+    } else if (state.durationSec > 0) {
+      els["clock-label"].textContent = `0:00 / ${fmtTime(state.durationSec * 1000)}`;
+    } else {
+      els["clock-label"].textContent = "0:00 / 0:00";
+    }
+  }
+
+  /* ---------- TOASTS ---------- */
+  function toast(level, title, message = "", timeout = 4200) {
+    const div = document.createElement("div");
+    div.className = `toast ${level}`;
+    const iconMap = { success: ICONS.check, warn: ICONS.warn, error: ICONS.errorx, info: ICONS.info };
+    div.innerHTML = `${iconMap[level] || ICONS.info}
+      <div><b>${escapeHtml(title)}</b>${message ? `<small>${escapeHtml(message)}</small>` : ""}</div>`;
+    els["toasts"].appendChild(div);
+    setTimeout(() => {
+      div.classList.add("leaving");
+      setTimeout(() => div.remove(), 240);
+    }, timeout);
+  }
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  /* ---------- WIZARD ---------- */
+  function showWizard(show) {
+    els["setup-overlay"].hidden = !show;
+  }
+  function renderDownload(e) {
+    if (!els["setup-overlay"].hidden || state.dlRunning) {
+      els["dl-progress"].hidden = !(e && (e.state === "running"));
+      if (e && e.state !== undefined) {
+        // PATCH run #31: kẹp pct 0..100 phòng backend cũ gửi giá trị thô
+        // (đã gặp 14227792400% khi SizeHint chưa được nhúng vào manifest).
+        const pct = Math.max(0, Math.min(100, e.pct ?? 0));
+        els["dl-fill"].style.setProperty("--w", pct + "%");
+        if (e.currentFile) els["dl-file"].textContent = e.currentFile.split("/").pop();
+        if (e.fileIdx) els["dl-files-idx"].textContent = `${e.fileIdx}/${e.totalFiles}`;
+        if (e.bytesDone != null)
+          els["dl-bytes"].textContent = `${fmtBytes(e.bytesDone)} / ${fmtBytes(e.bytesTotal)}`;
+        els["dl-pct"].textContent = Math.round(pct) + "%";
+      }
+    }
+    if (e?.state === "done") {
+      state.dlRunning = false;
+      refreshAppStateThenVoices();
+      showWizard(false);
+    } else if (e?.state === "error") {
+      state.dlRunning = false;
+      toast("error", "Tải mô hình lỗi", e.message || "");
+      els["wiz-dl"].disabled = false;
+    } else if (e?.state === "cancelled") {
+      state.dlRunning = false;
+      els["wiz-dl"].disabled = false;
+    }
+  }
+  const fmtBytes = (b) => {
+    if (b >= 1073741824) return (b / 1073741824).toFixed(2) + " GB";
+    if (b >= 1048576) return (b / 1048576).toFixed(1) + " MB";
+    if (b >= 1024) return (b / 1024).toFixed(1) + " KB";
+    return b + " B";
+  };
+  async function refreshAppStateThenVoices() {
+    await actions.hydrate();
+  }
+  function wireWizard() {
+    els["wiz-dl"].addEventListener("click", async () => {
+      els["wiz-dl"].disabled = true;
+      state.dlRunning = true;
+      await bridge.DownloadNeuralAssets();
+    });
+    // PATCH FIX48 — CHỦ QUYỀN NGUỒN: nhập gói ZIP weights từ nguồn riêng
+    // (GitHub Release của chủ app, NAS, USB...) — không cần mạng.
+    if (els["wiz-import"]) {
+      els["wiz-import"].addEventListener("click", async () => {
+        els["wiz-import"].disabled = true;
+        try {
+          const raw = await bridge.ImportOfflinePackage();
+          let rep = null;
+          try { rep = raw ? JSON.parse(raw) : null; } catch (_) {}
+          if (!rep || !rep.message) {
+            // người dùng đóng hộp thoại chọn file — im lặng
+          } else if (rep.ok) {
+            toast("success", "Đã nhập gói mô hình", rep.message, 6000);
+            await refreshAppStateThenVoices();
+            showWizard(false);
+          } else {
+            toast("error", "Nhập gói chưa hoàn tất", rep.message, 8000);
+          }
+        } finally {
+          els["wiz-import"].disabled = false;
+        }
+      });
+    }
+    els["wiz-skip"].addEventListener("click", () => showWizard(false));
+  }
+
+  /* ---------- TITLEBAR ---------- */
+  function wireTitlebar() {
+    $("#btn-win-close").addEventListener("click", () => bridge.WindowAction("close"));
+    $("#btn-win-min").addEventListener("click", () => bridge.WindowAction("min"));
+    $("#btn-win-max").addEventListener("click", () => bridge.WindowAction("max"));
+    els["btn-theme"].addEventListener("click", cycleTheme);
+    els["btn-models"].addEventListener("click", () => bridge.OpenFolder("models"));
+  }
+  function cycleTheme() {
+    // chu kỳ auto → light → dark → auto
+    state.themeMode = state.themeMode === "auto" ? "light"
+                    : state.themeMode === "light" ? "dark" : "auto";
+    applyTheme();
+    actions.saveDebounced();
+    const label = { auto: "Tự động theo Windows", light: "Chế độ sáng", dark: "Chế độ tối" };
+    toast("info", label[state.themeMode], "", 1600);
+  }
+
+  function renderEnginePill() {
+    const pill = els["engine-pill"];
+    const as = state.appState;
+    if (!as) return;
+    if (!as.neuralLinked) {
+      pill.textContent = "LITE · SAPI5"; pill.className = "engine-pill offline";
+    } else if (as.neuralReady) {
+      pill.textContent = "NEURAL READY"; pill.className = "engine-pill ready";
+    } else {
+      pill.textContent = "THIẾU MÔ HÌNH"; pill.className = "engine-pill missing";
+    }
+  }
+
+  /* ---------- EXPOSE ---------- */
+  // PATCH FIX46: wiring nhân bản giọng — checkbox bật/tắt panel, nút chọn
+  // file WAV qua dialog native; state chỉ runtime, không persist settings.
+  /* ---------- PATCH FIX51: Nhẹ RAM (int8) ---------- */
+  let int8Ready = false;
+  async function refreshInt8Status() {
+    if (!els["lightram-check"]) return;
+    try {
+      const raw = await bridge.GetInt8Status();
+      const st = typeof raw === "string" ? JSON.parse(raw || "{}") : (raw || {});
+      int8Ready = !!st.ready;
+      if (els["lightram-dl"]) els["lightram-dl"].hidden = int8Ready;
+      if (els["lightram-note"]) {
+        els["lightram-note"].textContent = int8Ready
+          ? "Đã có bản int8 trên máy — bật gạt để dùng ở lần khởi động sau."
+          : `Chưa có bản int8 trên máy (~${st.totalMB || 158} MB) — bấm tải MỘT LẦN, sau đó offline vĩnh viễn.`;
+      }
+    } catch (e) { /* mock/preview — bỏ qua */ }
+  }
+  function wireLightRam() {
+    if (!els["lightram-check"]) return;
+    bridge.GetSettings().then((s) => {
+      if (s && els["lightram-check"]) els["lightram-check"].checked = !!s.lightRam;
+    }).catch(() => {});
+    els["lightram-check"].addEventListener("change", () => {
+      const on = els["lightram-check"].checked;
+      actions.patch({ lightRam: on });
+      actions.saveDebounced();
+      refreshInt8Status();
+    });
+    if (els["lightram-dl"]) {
+      els["lightram-dl"].addEventListener("click", () => {
+        if (bridge.DownloadInt8Assets) bridge.DownloadInt8Assets();
+      });
+    }
+    bridge.bus.on("hcstudio:modeldl", (e) => {
+      if (e && e.state === "done") refreshInt8Status();
+    });
+    refreshInt8Status();
+  }
+
+  function wireRefClone() {
+    if (!els["ref-clone-check"]) return;
+    els["ref-clone-check"].addEventListener("change", () => {
+      const on = !!els["ref-clone-check"].checked;
+      els["ref-clone-body"].style.display = on ? "block" : "none";
+      if (on && !state.refAudioPath) {
+        toast("info", "Nhân bản giọng",
+          "Chọn một file WAV giọng mẫu 5–15 giây (nói rõ, ít tiếng ồn) để đọc thử.");
+      }
+      actions.patch({ refCloneOn: on });
+    });
+    els["ref-clone-pick"].addEventListener("click", () => {
+      Promise.resolve(bridge.PickRefAudio()).then((path) => {
+        if (!path) return;
+        els["ref-clone-name"].textContent = path.split(/[\\/]/).pop();
+        els["ref-clone-name"].title = path;
+        actions.patch({ refAudioPath: path });
+        toast("success", "Đã chọn file mẫu", path);
+      }).catch(() => {});
+    });
+  }
+
+  /* ---------- PATCH FIX52: chuyển đổi / streaming / hàng đợi / playlist ---------- */
+  function wireFix52() {
+    if (els["btn-convert"]) {
+      els["btn-convert"].addEventListener("click", () => window.HC.ui.convertRequested());
+    }
+    if (els["btn-open-export"]) {
+      els["btn-open-export"].addEventListener("click", () => bridge.OpenFolder("exports"));
+    }
+    if (els["stream-live-check"]) {
+      bridge.GetSettings().then((s) => {
+        if (s && els["stream-live-check"]) {
+          els["stream-live-check"].checked = s.streamLive !== false;
+        }
+      }).catch(() => {});
+      els["stream-live-check"].addEventListener("change", () => {
+        actions.patch({ streamLive: els["stream-live-check"].checked });
+        actions.saveDebounced();
+      });
+    }
+    if (els["btn-queue-add"]) {
+      els["btn-queue-add"].addEventListener("click", addToQueue);
+    }
+    if (els["btn-queue-clear"]) {
+      els["btn-queue-clear"].addEventListener("click", () => {
+        if (state.queueRunning) {
+          toast("warn", "Đang chạy", "Hàng đợi đang tổng hợp — chờ xong rồi xoá nhé.");
+          return;
+        }
+        actions.patch({ queue: [] });
+        renderQueue();
+      });
+    }
+    renderQueue();
+    refreshPlaylist();
+  }
+
+  // Hàng đợi tổng hợp: mỗi đoạn (cách nhau bởi dòng trống) được tổng hợp
+  // lần lượt; xong từng đoạn sẽ xuất hiện trong danh sách phát.
+  function addToQueue() {
+    const raw = els["text-input"].value;
+    const parts = raw.split(/\n\s*\n+/).map((s) => s.trim()).filter(Boolean);
+    if (!parts.length) {
+      toast("warn", "Chưa có văn bản", "Dán nội dung (các đoạn cách nhau bởi dòng trống) rồi bấm Xếp hàng.");
+      return;
+    }
+    if (state.jobBusy) {
+      toast("info", "Đang tổng hợp", "Đợi job hiện tại xong đã rồi xếp hàng tiếp nhé.");
+      return;
+    }
+    const items = parts.map((t) => ({ text: t, status: "wait", jobId: null }));
+    actions.patch({ queue: state.queue.concat(items) });
+    els["text-input"].value = "";
+    state.text = "";
+    updateCounter();
+    renderQueue();
+    runQueueNext();
+  }
+
+  function runQueueNext() {
+    if (state.queueRunning) return;
+    const idx = state.queue.findIndex((q) => q.status === "wait");
+    if (idx < 0) { renderQueue(); return; }
+    const q2 = state.queue.slice();
+    q2[idx] = { ...state.queue[idx], status: "run" };
+    actions.patch({ queue: q2, queueRunning: true });
+    renderQueue();
+    setEditorText(state.queue[idx].text);
+    const off = bridge.bus.on("hcstudio:job", (j) => {
+      if (j.state === "done" || j.state === "error" || j.state === "cancelled") {
+        off();
+        const qi = state.queue.findIndex((x) => x.status === "run");
+        if (qi >= 0) {
+          const upd = { ...state.queue[qi], status: j.state === "done" ? "done" : "err" };
+          const q3 = state.queue.slice();
+          q3[qi] = upd;
+          actions.patch({ queue: q3, queueRunning: false });
+        } else {
+          actions.patch({ queueRunning: false });
+        }
+        refreshPlaylist();
+        renderQueue();
+        setTimeout(runQueueNext, 350);
+      }
+    });
+    window.HC.ui.convertRequested();
+  }
+
+  function setEditorText(t) {
+    els["text-input"].value = t;
+    state.text = t;
+    updateCounter();
+  }
+
+  function renderQueue() {
+    if (!els["queue-list"]) return;
+    const wrap = els["queue-list"];
+    wrap.innerHTML = "";
+    if (els["queue-count-chip"]) {
+      const pending = state.queue.filter((q) => q.status === "wait" || q.status === "run").length;
+      els["queue-count-chip"].textContent = String(pending);
+    }
+    if (!state.queue.length) {
+      const d = document.createElement("div");
+      d.className = "queue-empty";
+      d.textContent = "Hàng đợi trống — dán nhiều đoạn (cách nhau dòng trống) rồi bấm \"Xếp hàng từ văn bản\".";
+      wrap.appendChild(d);
+      return;
+    }
+    state.queue.forEach((q) => {
+      const row = document.createElement("div");
+      row.className = "queue-row " + (q.status === "done" ? "done" : q.status === "err" ? "err" : "");
+      const label = q.status === "run" ? "Đang tổng hợp…" : q.status === "wait" ? "Đang chờ" : q.status === "done" ? "Xong" : "Lỗi";
+      const icon = q.status === "done" ? ICONS.check : q.status === "err" ? ICONS.errorx : ICONS.info;
+      row.innerHTML = `<span class="q-status">${icon}</span><span class="q-text"></span><span class="q-meta">${label}</span>`;
+      row.querySelector(".q-text").textContent = [...q.text].slice(0, 90).join("");
+      wrap.appendChild(row);
+    });
+  }
+
+  async function refreshPlaylist() {
+    if (!els["playlist-list"] || !bridge.ListSessions) return;
+    try {
+      const list = await bridge.ListSessions();
+      actions.patch({ sessions: Array.isArray(list) ? list : [] });
+    } catch { return; }
+    const wrap = els["playlist-list"];
+    wrap.innerHTML = "";
+    if (!state.sessions.length) return;
+    state.sessions.forEach((s) => {
+      const row = document.createElement("div");
+      row.className = "queue-row done";
+      const play = document.createElement("button");
+      play.type = "button"; play.title = "Nghe";
+      play.innerHTML = ICONS.play;
+      play.addEventListener("click", () => {
+        actions.patch({ lastFinishedJob: s.id });
+        bridge.PlayJob(s.id).catch(() => {});
+      });
+      const exp = document.createElement("button");
+      exp.type = "button"; exp.title = "Xuất MP3";
+      exp.innerHTML = ICONS.mp3;
+      exp.addEventListener("click", () => window.HC.ui.exportAudio("mp3", s.id));
+      const meta = document.createElement("span");
+      meta.className = "q-meta";
+      meta.textContent = `${Math.round(s.duration)}s · ${s.voiceId || s.engine}`;
+      const txt = document.createElement("span");
+      txt.className = "q-text";
+      txt.textContent = s.textPreview || "";
+      row.appendChild(play); row.appendChild(txt); row.appendChild(meta); row.appendChild(exp);
+      wrap.appendChild(row);
+    });
+  }
+
+  /* ---------- PATCH FIX53: chế độ sử dụng online (cầu nối) ---------- */
+  function renderModeSeg() {
+    if (!els["mode-seg"]) return;
+    els["btn-mode-offline"].classList.toggle("active", state.mode === "offline");
+    els["btn-mode-online"].classList.toggle("active", state.mode === "online");
+    document.body.classList.toggle("mode-online", state.mode === "online");
+    if (els["cloud-row"]) els["cloud-row"].hidden = state.mode !== "online";
+    if (els["cloud-card"]) els["cloud-card"].hidden = state.mode !== "online";
+    if (els["btn-convert"]) {
+      const label = els["btn-convert"].querySelector("span");
+      if (label) label.textContent = state.mode === "online" ? "Chuyển đổi online" : "Chuyển đổi";
+      els["btn-convert"].title = state.mode === "online"
+        ? "Gửi văn bản lên vieneu.io → HF Space… (hết lượt tự chuyển tiếp) — chỉ bấm 1 lần"
+        : "Chuyển văn bản thành giọng nói — chỉ bấm 1 lần rồi đợi kết quả";
+    }
+  }
+
+  function renderCloudPanel() {
+    if (!els["cloud-panel-list"]) return;
+    const wrap = els["cloud-panel-list"];
+    wrap.innerHTML = "";
+    if (!state.cloudProviders.length) {
+      const d = document.createElement("div");
+      d.className = "cloud-empty";
+      d.textContent = "Đang tải danh sách dịch vụ…";
+      wrap.appendChild(d);
+      return;
+    }
+    const dotClass = { ok: "ok", quota: "quota", err: "err", skip: "skip", unknown: "unknown" };
+    const statusText = (p) => {
+      if (p.skipReason) return "Bỏ qua";
+      switch (p.status) {
+        case "ok": return "Hoạt động";
+        case "quota": return "Hết lượt hôm nay";
+        case "err": return "Lỗi";
+        case "skip": return "Tạm tránh";
+        default: return "Chưa dùng";
+      }
+    };
+    state.cloudProviders.forEach((p, idx) => {
+      const row = document.createElement("div");
+      row.className = "cloud-row-item";
+      row.title = p.skipReason || p.note || p.err || "";
+      const dot = document.createElement("span");
+      dot.className = "cloud-dot " + (dotClass[p.status] || "unknown");
+      const meta = document.createElement("span");
+      meta.className = "cloud-meta";
+      meta.textContent = `${idx + 1}. ${p.label}`;
+      const right = document.createElement("span");
+      right.className = "q-meta cloud-status";
+      const bits = [statusText(p)];
+      if (p.countToday > 0) bits.push(`${p.countToday} lượt`);
+      if (p.lastOKAt) bits.push(p.lastOKAt);
+      right.textContent = bits.join(" · ");
+      row.appendChild(dot); row.appendChild(meta); row.appendChild(right);
+      wrap.appendChild(row);
+    });
+  }
+
+  function rebuildCloudVoiceOptions() {
+    if (!els["cloud-voice-select"]) return;
+    const sel = els["cloud-voice-select"];
+    const seen = new Set();
+    const opts = [];
+    (state.cloudProviders || []).forEach((p) => {
+      (p.voices || []).forEach((v) => {
+        const name = v.name || v.Name;
+        if (!name || seen.has(name)) return;
+        seen.add(name);
+        opts.push(name);
+      });
+    });
+    state.cloudVoiceOptions = opts;
+    sel.innerHTML = "";
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = "Giọng mặc định từng dịch vụ";
+    sel.appendChild(def);
+    opts.forEach((name) => {
+      const o = document.createElement("option");
+      o.value = name;
+      o.textContent = name;
+      sel.appendChild(o);
+    });
+    sel.value = opts.includes(state.cloudVoice) ? state.cloudVoice : "";
+  }
+
+  async function refreshCloudProviders() {
+    if (!bridge.CloudProviders) return;
+    try {
+      const list = await bridge.CloudProviders();
+      actions.patch({ cloudProviders: Array.isArray(list) ? list : [] });
+    } catch { return; }
+    renderCloudPanel();
+    rebuildCloudVoiceOptions();
+  }
+
+  function wireFix53() {
+    if (els["btn-mode-offline"] && els["btn-mode-online"]) {
+      els["btn-mode-offline"].addEventListener("click", () => {
+        actions.patch({ mode: "offline" });
+        renderModeSeg();
+      });
+      els["btn-mode-online"].addEventListener("click", () => {
+        actions.patch({ mode: "online" });
+        renderModeSeg();
+        refreshCloudProviders();
+      });
+    }
+    if (els["cloud-voice-select"]) {
+      els["cloud-voice-select"].addEventListener("change", () => {
+        actions.patch({ cloudVoice: els["cloud-voice-select"].value });
+        actions.saveDebounced();
+      });
+    }
+    if (els["btn-cloud-file"]) {
+      els["btn-cloud-file"].addEventListener("click", async () => {
+        try {
+          const content = await bridge.CloudPickTextFile();
+          if (content) {
+            els["text-input"].value = content;
+            state.text = content;
+            updateCounter();
+            toast("success", "Đã nạp file", `${[...content].length.toLocaleString("vi-VN")} ký tự trong ô văn bản.`);
+          }
+        } catch (e) { /* người dùng huỷ */ }
+      });
+    }
+    if (els["btn-cloud-refresh"]) {
+      els["btn-cloud-refresh"].addEventListener("click", refreshCloudProviders);
+    }
+    renderModeSeg();
+    refreshCloudProviders();
+  }
+
+  window.HC.ui = {
+    init() {
+      renderIcons(document);   // thay mọi i[data-ico]
+      wireTitlebar();
+      wireDropdown();
+      wireEngineSeg();
+      wireSliders();
+      wireEditor();
+      wireWizard();
+      wireRefClone();
+      wireLightRam();
+      wireFix52();
+      wireFix53();
+
+      bridge.bus.on("hcstudio:job", (j) => {
+        if (j.state === "splitting" || j.state === "synthesizing" || j.state === "dsp") {
+          actions.patch({ jobBusy: true, currentJob: j.id,
+            progressPct: j.pct, stageLabel: j.message || j.state, etaSec: j.etaSec,
+            elapsedSec: j.elapsedSec ?? state.elapsedSec,
+            streaming: !!j.streaming });
+        } else if (j.state === "done") {
+          actions.patch({ jobBusy: false, lastFinishedJob: j.id,
+            progressPct: 100, stageLabel:
+              `Hoàn tất · ${fmtTime((j.durationSec ?? 0) * 1000)}`,
+            durationSec: j.durationSec, streaming: false });
+          refreshPlaylist();
+          // PATCH FIX53: refresh trạng thái dịch vụ online sau mỗi job cloud
+          if (String(j.id || "").startsWith("cloud-")) refreshCloudProviders();
+          setTimeout(() => actions.patch({
+            stageLabel: state.playing ? "Đang phát…" : "Sẵn sàng"
+          }), 2600);
+        } else if (j.state === "error") {
+          actions.patch({ jobBusy: false, progressPct: 0,
+            stageLabel: "Lỗi · xem thông báo", currentJob: null, streaming: false });
+        } else if (j.state === "cancelled") {
+          actions.patch({ jobBusy: false, progressPct: 0, stageLabel: "Đã huỷ", streaming: false });
+        }
+      });
+      bridge.bus.on("hcstudio:play", (p) => {
+        actions.patch({
+          playing: !!p.playing,
+          cursorMs: p.cursorMs ?? state.cursorMs,
+          totalMs: p.totalMs ?? state.totalMs,
+          paused: false,
+          streaming: p.playing ? state.streaming : false,
+          stageLabel: p.playing ? "Đang phát…"
+            : (state.jobBusy ? state.stageLabel : "Sẵn sàng"),
+        });
+      });
+      bridge.bus.on("hcstudio:transport", (t) => {
+        actions.patch({ playing: !!t.playing });
+      });
+      bridge.bus.on("hcstudio:toast", (t) => toast(t.level, t.title, t.message));
+      bridge.bus.on("hcstudio:modeldl", renderDownload);
+    },
+
+    // PATCH FIX52: PHÁT chỉ nghe KẾT QUẢ đã tổng hợp (nghe trước khi xuất
+    // file). Việc tạo giọng nói tách riêng sang nút "Chuyển đổi".
+    playRequested() {
+      if (state.playing) {
+        // đang phát → pause/resume
+        bridge.PauseToggle().then((pausedNow) => {
+          actions.patch({ paused: pausedNow,
+            stageLabel: pausedNow ? "Tạm dừng" : "Đang phát…" });
+        });
+        return;
+      }
+      if (!state.lastFinishedJob) {
+        toast("warn", "Chưa có kết quả",
+          "Bấm \"Chuyển đổi\" để tạo giọng nói trước, sau đó bấm Phát để nghe.");
+        return;
+      }
+      bridge.PlayJob(state.lastFinishedJob).catch((e) => {
+        toast("error", "Không phát được", String((e && e.message) || e));
+      });
+    },
+
+    // PATCH FIX52: nút CHUYỂN ĐỔI — chỉ bấm 1 lần rồi đợi kết quả (nút tự
+    // khoá khi jobBusy, mở lại khi done/error/cancelled).
+    convertRequested() {
+      if (state.jobBusy) {
+        toast("info", "Đang tổng hợp", "Vui lòng đợi job hiện tại xong đã nhé.");
+        return;
+      }
+      const text = els["text-input"].value.trim();
+      if (!text) {
+        toast("warn", "Chưa có văn bản", "Nhập hoặc dán nội dung trước khi chuyển đổi.");
+        els["text-input"].focus();
+        return;
+      }
+      state.text = text;
+      // PATCH FIX53: CHẾ ĐỘ ONLINE — cầu nối chuyển tiếp qua chuỗi dịch vụ.
+      // Kết quả vẫn về thành session thường → PHÁT / xuất / playlist như cũ.
+      if (state.mode === "online") {
+        actions.patch({ stageLabel: "Chuẩn bị gửi lên dịch vụ online…", progressPct: 0, elapsedSec: 0 });
+        bridge.CloudSynthesize(text, state.cloudVoice || "")
+          .catch((e) => toast("error", "Không bắt đầu được (online)", String((e && e.message) || e)));
+        return;
+      }
+      // PATCH FIX46: nhân bản giọng — khi bật, bỏ voice preset và gửi path
+      // file WAV mẫu; backend buộc neural + core dùng ref_audio_path.
+      const useRef = state.refCloneOn && state.refAudioPath;
+      const streamLive = els["stream-live-check"] ? els["stream-live-check"].checked : false;
+      // Streaming chỉ bật khi chắc chắn không đụng DSP biến đổi:
+      // neural + tốc độ 1× + cao độ 0 → chất lượng GIỐNG HỆT đệm-đầy.
+      const canStream = streamLive && !useRef
+        && state.enginePref !== "sapi"
+        && Number(state.speed) === 1 && Number(state.pitch) === 0;
+      actions.patch({ stageLabel: "Bắt đầu tổng hợp…", progressPct: 0, elapsedSec: 0 });
+      bridge.Synthesize({
+        text,
+        voiceId: useRef ? "" : state.voiceId,
+        engineOverride: useRef ? "neural" : state.enginePref,
+        speed: state.speed,
+        pitch: state.pitch,
+        volume: state.volume,
+        autoPlay: canStream,
+        stream: canStream,
+        refAudioPath: useRef ? state.refAudioPath : "",
+      }).catch((e) => toast("error", "Không bắt đầu được", String((e && e.message) || e)));
+    },
+
+    // PATCH FIX52: NGHE THỦ giọng đang chọn bằng câu mẫu ngắn.
+    previewVoice() {
+      if (state.jobBusy) {
+        toast("info", "Đang tổng hợp", "Đợi job hiện tại xong đã nhé.");
+        return;
+      }
+      const useRef = state.refCloneOn && state.refAudioPath;
+      bridge.Synthesize({
+        text: "Xin chào, đây là giọng đọc thử của HCStudio.",
+        voiceId: useRef ? "" : state.voiceId,
+        engineOverride: useRef ? "neural" : state.enginePref,
+        speed: state.speed,
+        pitch: state.pitch,
+        volume: state.volume,
+        autoPlay: true,
+        stream: false,
+        refAudioPath: useRef ? state.refAudioPath : "",
+      }).catch(() => {});
+    },
+
+    stopRequested() {
+      bridge.StopAll();
+    },
+
+    // PATCH FIX52: cho phép xuất từ một hàng trong danh sách phát.
+    exportAudio(format, jobId) {
+      const job = jobId || state.lastFinishedJob;
+      if (!job) {
+        toast("warn", "Chưa có bản ghi nào", "Hãy phát một đoạn văn bản trước đã.");
+        return;
+      }
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      bridge.PickSavePath(`HCStudio_${stamp}.${format}`).then((path) => {
+        if (!path) return;
+        bridge.ExportAudio(job, format, path);
+      });
+    },
+  };
+
+  /* ---------- SUBSCRIBE → render loop duy nhất ---------- */
+  subscribe((s, keys) => {
+    if (keys.includes("isDarkWin") || keys.includes("themeMode")) applyTheme();
+    if (keys.includes("voices") || keys.includes("voiceId")) syncVoiceSummary();
+    if (keys.includes("enginePref")) renderEngineSeg();
+    if (keys.includes("speed") || keys.includes("pitch") || keys.includes("volume")) renderSliders();
+    if (keys.length === 0 || true) renderTransport();
+    if (keys.includes("appState")) {
+      renderEnginePill();
+      // mở wizard lần đầu nếu neural thiếu và người dùng chưa quyết gì
+      if (s.appState.neuralLinked && !s.appState.neuralReady && !window.HC._wizDismissed) {
+        showWizard(true);
+      }
+    }
+  });
+})();

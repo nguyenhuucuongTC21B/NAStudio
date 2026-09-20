@@ -1,0 +1,324 @@
+package cloud
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// ---------- fake vieneu.io ----------
+
+func fakeVieneu(t *testing.T, mode string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/tts/demo", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Text    string `json:"text"`
+			VoiceID string `json:"voiceId"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		switch mode {
+		case "ok":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"audioBase64": base64.StdEncoding.EncodeToString([]byte("RIFF-fake-audio")),
+				"mimeType":    "audio/wav",
+			})
+		case "quota":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"Bạn đã hết lượt miễn phí hôm nay"}`))
+		case "down":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("boom"))
+		}
+	})
+	return httptest.NewServer(mux)
+}
+
+// ---------- fake gradio ----------
+
+func fakeGradioFull(t *testing.T, mode string, calls *atomic.Int32) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	audio := "AUDIO_URL" // điền sau khi biết srv.URL — dùng path tương đối qua handler riêng
+	srv := httptest.NewServer(mux)
+	audio = srv.URL + "/gradio_api/file=/tmp/gradio/x/audio.wav"
+	// Đăng ký CẢ pattern chính xác (POST /call/synthesize) lẫn subtree
+	// (GET /call/synthesize/{event_id}) — ServeMux không tự khớp chéo.
+	h := func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			calls.Add(1)
+			switch mode {
+			case "ok":
+				_ = json.NewEncoder(w).Encode(map[string]string{"event_id": "ev-1"})
+			case "quota":
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte("GPU quota exceeded"))
+			case "sleeping":
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte("space is starting"))
+			case "error":
+				_ = json.NewEncoder(w).Encode(map[string]string{"event_id": "ev-err"})
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if mode == "error" {
+			_, _ = w.Write([]byte("event: error\ndata: null\n\n"))
+			return
+		}
+		_, _ = w.Write([]byte("event: heartbeat\ndata: null\n\nevent: process_starts\ndata: null\n\nevent: complete\ndata: " +
+			`[{"path":"/tmp/gradio/x/audio.wav","url":"` + audio + `","meta":{"_type":"gradio.FileData"}},"⏱ 12s · RTF 1.2"]` + "\n\n"))
+	}
+	mux.HandleFunc("/gradio_api/call/synthesize", h)
+	mux.HandleFunc("/gradio_api/call/synthesize/", h)
+	mux.HandleFunc("/gradio_api/file=/tmp/gradio/x/audio.wav", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("RIFF-fake-space-audio"))
+	})
+	return srv
+}
+
+func testChain() *Chain {
+	c := NewChain("")
+	c.nowFn = func() time.Time { return time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC) }
+	return c
+}
+
+func TestVieneuIODemoOK(t *testing.T) {
+	srv := fakeVieneu(t, "ok")
+	defer srv.Close()
+	d := Desc{ID: "vieneu-io", Label: "vieneu.io", Kind: "vieneuio", Base: srv.URL,
+		API: "/api/tts/demo", DefaultVoice: "Adam Tốp Tốp",
+		Voices: []Voice{{Name: "Adam Tốp Tốp"}}}
+	res, err := synthVieneuIO(context.Background(), newHTTP(), d, Request{Text: "xin chào", VoiceName: "Adam Tốp Tốp"})
+	if err != nil {
+		t.Fatalf("expected OK, got %v", err)
+	}
+	if string(res.Audio) != "RIFF-fake-audio" || res.MIME != "audio/wav" || res.VoiceUsed != "Adam Tốp Tốp" {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+func TestVieneuIOQuota(t *testing.T) {
+	srv := fakeVieneu(t, "quota")
+	defer srv.Close()
+	d := Desc{ID: "vieneu-io", Base: srv.URL, API: "/api/tts/demo", DefaultVoice: "A"}
+	_, err := synthVieneuIO(context.Background(), newHTTP(), d, Request{Text: "x"})
+	if !IsQuota(err) {
+		t.Fatalf("expected quota error, got %v", err)
+	}
+}
+
+func TestGradioTemplateOK(t *testing.T) {
+	calls := &atomic.Int32{}
+	srv := fakeGradioFull(t, "ok", calls)
+	defer srv.Close()
+	d := Desc{ID: "hf-x", Label: "space-x", Kind: "gradio", Base: srv.URL, API: "synthesize",
+		DataStyle: "template", DefaultVoice: "Trúc Ly",
+		Voices: []Voice{{Name: "Trúc Ly"}}}
+	res, err := synthGradio(context.Background(), newHTTP(), d, Request{Text: "xin chào", VoiceName: "Trúc Ly"}, nil)
+	if err != nil {
+		t.Fatalf("expected OK, got %v", err)
+	}
+	if string(res.Audio) != "RIFF-fake-space-audio" {
+		t.Fatalf("unexpected audio: %q", res.Audio)
+	}
+	if !strings.Contains(res.Info, "RTF") {
+		t.Fatalf("expected info from markdown output, got %q", res.Info)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected 1 POST, got %d", calls.Load())
+	}
+}
+
+func TestGradioDataShapes(t *testing.T) {
+	d := Desc{DataStyle: "template"}
+	got := fmt.Sprint(gradioData(d, "T", "V"))
+	want := fmt.Sprint([]any{"T", "V", nil, 0.8, 25, 0.95, 1.2, 300, 256})
+	if got != want {
+		t.Fatalf("template data mismatch:\n got %s\nwant %s", got, want)
+	}
+	d2 := Desc{DataStyle: "smrfhdl"}
+	got2 := fmt.Sprint(gradioData(d2, "T", "V"))
+	want2 := fmt.Sprint([]any{"T", "V", "cpu", nil})
+	if got2 != want2 {
+		t.Fatalf("smrfhdl data mismatch: %s", got2)
+	}
+}
+
+func TestGradioErrorEventNotQuota(t *testing.T) {
+	calls := &atomic.Int32{}
+	srv := fakeGradioFull(t, "error", calls)
+	defer srv.Close()
+	d := Desc{ID: "hf-y", Base: srv.URL, API: "synthesize", DataStyle: "template", DefaultVoice: "V"}
+	_, err := synthGradio(context.Background(), newHTTP(), d, Request{Text: "x"}, nil)
+	if err == nil || IsQuota(err) {
+		t.Fatalf("expected non-quota error, got %v", err)
+	}
+}
+
+func TestChainFallbackOrderRealPath(t *testing.T) {
+	srvV := fakeVieneu(t, "quota")
+	defer srvV.Close()
+	calls := &atomic.Int32{}
+	srvE := fakeGradioFull(t, "error", calls)
+	defer srvE.Close()
+	calls2 := &atomic.Int32{}
+	srvOK := fakeGradioFull(t, "ok", calls2)
+	defer srvOK.Close()
+
+	c := testChain()
+	c.reg = []Desc{
+		{ID: "p1", Label: "P1", Kind: "vieneuio", Base: srvV.URL, API: "/api/tts/demo", DefaultVoice: "A"},
+		{ID: "p2", Label: "P2", Kind: "gradio", Base: srvE.URL, API: "synthesize", DataStyle: "template", DefaultVoice: "V"},
+		{ID: "p3", Label: "P3", Kind: "gradio", Base: srvOK.URL, API: "synthesize", DataStyle: "template", DefaultVoice: "V"},
+	}
+	var phases []string
+	res, err := c.Synthesize(context.Background(), newHTTP(), Request{Text: "test"}, func(e Event) {
+		phases = append(phases, e.Phase+"@"+e.ProviderID)
+	})
+	if err != nil {
+		t.Fatalf("expected success via p3, got %v (phases=%v)", err, phases)
+	}
+	if res.ProviderID != "p3" || res.Tried != 3 {
+		t.Fatalf("unexpected result provider=%s tried=%d", res.ProviderID, res.Tried)
+	}
+	if c.snap.Providers["p1"].Status != "quota" || c.snap.Providers["p1"].ExhaustedUntil != c.today() {
+		t.Fatalf("p1 should be exhausted today: %+v", c.snap.Providers["p1"])
+	}
+	if c.snap.LastGood != "p3" {
+		t.Fatalf("lastGood should be p3")
+	}
+	joined := strings.Join(phases, ",")
+	if !strings.Contains(joined, "quota@p1") || !strings.Contains(joined, "fail@p2") || !strings.Contains(joined, "done@p3") {
+		t.Fatalf("missing phase events: %v", phases)
+	}
+
+	// lần 2: p1 cạn lượt (skip hết ngày), p2 cooldown 5 phút → nhảy thẳng p3
+	res2, err := c.Synthesize(context.Background(), newHTTP(), Request{Text: "test"}, nil)
+	if err != nil || res2.ProviderID != "p3" || res2.Tried != 1 {
+		t.Fatalf("second run should hit p3 directly, got provider=%s tried=%d err=%v", res2.ProviderID, res2.Tried, err)
+	}
+}
+
+func TestChainWakeRetry(t *testing.T) {
+	oldDelay := WakeRetryDelay
+	WakeRetryDelay = 30 * time.Millisecond
+	defer func() { WakeRetryDelay = oldDelay }()
+
+	var posts atomic.Int32
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	wh := func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			if posts.Add(1) == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte("starting"))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"event_id": "ev-ok"})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: complete\ndata: " +
+			`[{"url":"` + srv.URL + `/file.wav","meta":{"_type":"gradio.FileData"}}]` + "\n\n"))
+	}
+	mux.HandleFunc("/gradio_api/call/synthesize", wh)
+	mux.HandleFunc("/gradio_api/call/synthesize/", wh)
+	mux.HandleFunc("/file.wav", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("RIFF-wake-audio"))
+	})
+
+	c := testChain()
+	c.reg = []Desc{{ID: "sleepy", Label: "Sleepy", Kind: "gradio", Base: srv.URL, API: "synthesize", DataStyle: "template", DefaultVoice: "V"}}
+	res, err := c.Synthesize(context.Background(), newHTTP(), Request{Text: "x"}, nil)
+	if err != nil || posts.Load() != 2 {
+		t.Fatalf("wake retry should succeed after 1 retry: err=%v posts=%d", err, posts.Load())
+	}
+	if string(res.Audio) != "RIFF-wake-audio" {
+		t.Fatalf("unexpected audio %q", res.Audio)
+	}
+}
+
+func TestChainArenaSkipped(t *testing.T) {
+	srv := fakeVieneu(t, "ok")
+	defer srv.Close()
+	c := testChain()
+	c.reg = []Desc{
+		{ID: "arena-x", Label: "arena", Kind: "arena", Base: srv.URL, SkipReason: "chỉ bỏ phiếu"},
+		{ID: "p1", Label: "P1", Kind: "vieneuio", Base: srv.URL, API: "/api/tts/demo", DefaultVoice: "A"},
+	}
+	res, err := c.Synthesize(context.Background(), newHTTP(), Request{Text: "x"}, nil)
+	if err != nil || res.ProviderID != "p1" {
+		t.Fatalf("arena should be skipped, got %v %v", res.ProviderID, err)
+	}
+	if c.snap.Providers["arena-x"].Status != "skip" {
+		t.Fatalf("arena status should be skip")
+	}
+}
+
+func TestSnapshotRoundTrip(t *testing.T) {
+	c := testChain()
+	c.snap.Providers["x"] = &PState{Status: "quota", ExhaustedUntil: c.today(), CountToday: 3, Day: c.today()}
+	j := c.SnapshotJSON()
+	c2 := NewChain(j)
+	if !c2.exhausted("x") {
+		t.Fatalf("exhaustion should survive round-trip: %s", j)
+	}
+	st := c2.StatusOf("x")
+	if st.CountToday != 3 || st.Status != "quota" {
+		t.Fatalf("state mismatch: %+v", st)
+	}
+}
+
+func TestRegistryShapeAndVoiceResolve(t *testing.T) {
+	reg := Registry()
+	if len(reg) != 10 {
+		t.Fatalf("registry must have exactly 10 providers, got %d", len(reg))
+	}
+	if reg[0].ID != "vieneu-io" || reg[1].ID != "hf-pnnbao-ump" || reg[2].ID != "arena-thomcles" {
+		t.Fatalf("wrong order: %s %s %s", reg[0].ID, reg[1].ID, reg[2].ID)
+	}
+	if reg[2].SkipReason == "" {
+		t.Fatalf("arena must carry SkipReason")
+	}
+	for _, d := range reg {
+		if d.ID == "" || d.Label == "" || d.Base == "" {
+			t.Fatalf("incomplete desc: %+v", d)
+		}
+	}
+	d := Registry()[4] // eagle0019
+	if len(d.Voices) == 0 || d.Voices[0].Name == "" {
+		t.Fatalf("eagle0019 must have probed voices")
+	}
+	v, changed := d.ResolveVoice("trúc ly")
+	if changed {
+		t.Fatalf("case-insensitive match should hit, got %q changed=%v", v, changed)
+	}
+	v, _ = d.ResolveVoice("giọng lạ hoàn toàn")
+	if v != d.DefaultVoice {
+		t.Fatalf("unknown voice should fallback to default, got %q", v)
+	}
+	// vieneu.io phải có đúng 10 giọng featured thật
+	if len(Registry()[0].Voices) != 10 {
+		t.Fatalf("vieneu.io featured must be 10, got %d", len(Registry()[0].Voices))
+	}
+}
+
+func TestParseSSE(t *testing.T) {
+	var names []string
+	parseSSE(strings.NewReader("event: heartbeat\ndata: null\n\nevent: complete\ndata: [1,2]\n\n"), func(e gradioEvent) {
+		names = append(names, e.name+":"+e.data)
+	})
+	if len(names) != 2 || names[0] != "heartbeat:null" || names[1] != "complete:[1,2]" {
+		t.Fatalf("parseSSE broken: %v", names)
+	}
+}
