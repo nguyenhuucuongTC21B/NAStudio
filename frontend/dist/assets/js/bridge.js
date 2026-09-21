@@ -260,6 +260,7 @@
       // lượt → space kế lỗi → space sau thành công (giúp thiết kế UI).
       // PATCH FIX56: thứ tự mới theo probe thật — DevTam05/hongqminh nâng
       // lên đầu; Smrfhdl gỡ (cần đăng nhập HF); vieneu.io host mới.
+      // PATCH FIX57: thêm hf-nguyenduc1222 (dự phòng họ hongqminh).
       async CloudProviders() {
         return [
           { id: "vieneu-io", label: "vieneu.io (chính thức)", kind: "vieneuio", status: "unknown", countToday: 0, defaultVoice: "Adam Tốp Tốp",
@@ -268,6 +269,8 @@
             note: "CPU thường — dịch vụ ổn định nhất trong probe 2026-09-21.", voices: ["Hoài My (Nữ)", "Nam Minh (Nam)"].map(n => ({ name: n })) },
           { id: "hf-hongqminh", label: "HF · hongqminh/VieNeu-TTS", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Tuyên (nam miền Bắc)",
             note: "CPU thường — chập chờn trong probe 2026-09-21.", voices: ["Tuyên (nam miền Bắc)", "Vĩnh (nam miền Nam)", "Bình (nam miền Bắc)", "Đoan (nữ miền Nam)", "Ngọc (nữ miền Bắc)", "Ly (nữ miền Bắc)"].map(n => ({ name: n })) },
+          { id: "hf-nguyenduc1222", label: "HF · nguyenduc1222/VieNeu-TTS", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Tuyên (nam miền Bắc)",
+            note: "CPU thường — cùng họ hongqminh, 9 giọng; probe 2026-09-21: complete 1,6s.", voices: ["Tuyên (nam miền Bắc)", "Vĩnh (nam miền Nam)", "Bình (nam miền Bắc)", "Nguyên (nam miền Nam)", "Sơn (nam miền Nam)", "Đoan (nữ miền Nam)", "Ngọc (nữ miền Bắc)", "Ly (nữ miền Bắc)", "Dung (nữ miền Nam)"].map(n => ({ name: n })) },
           { id: "arena-thomcles", label: "HF · Thomcles/yodalingua-tts-arena", kind: "arena", status: "skip", countToday: 0,
             skipReason: "Chỉ phục vụ bỏ phiếu mù — không có API tạo giọng.", voices: [] },
           { id: "hf-eagle0019", label: "HF · eagle0019/VieNeu-TTS-v3-Turbo", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Ngọc Linh",

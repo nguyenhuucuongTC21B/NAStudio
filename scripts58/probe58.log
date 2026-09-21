@@ -1,0 +1,35 @@
+==========================================================================
+PROBE58 — 2026-09-21 05:01:13
+==========================================================================
+
+A) api.vieneu.io — 4 giọng OD còn thiếu (xoay vòng worker?)
+  Mai Anh        HTTP 400 — {"statusCode":400,"message":"Voice \"Mai Anh\" is not available","error":"Bad Request","traceId":"10
+  Ngọc Trân      HTTP 400 — {"statusCode":400,"message":"Voice \"Ngọc Trân\" is not available","error":"Bad Request","traceId
+  Quang Sơn      HTTP 400 — {"statusCode":400,"message":"Voice \"Quang Sơn\" is not available","error":"Bad Request","traceId":
+  Minh Triết     HTTP 400 — {"statusCode":400,"message":"Voice \"Minh Triết\" is not available","error":"Bad Request","traceId
+  Ngọc Huyền     HTTP 400 — {"statusCode":400,"message":"Voice \"Ngọc Huyền\" is not available","error":"Bad Request","trace
+
+B) re-check nhanh ZeroGPU + CPU backbone
+  ✅ pnnbao-ump           voice='Minh Quân Pro'      → complete (5.2s) 
+  ❌ trangmin11101996     voice='Quang Sơn'          → error (0.7s) null
+  ❌ hongqminh            voice='Ngọc (nữ miền Bắc)' → error (0.7s) null
+  ❌ Tuananh20015         voice='Quang Sơn'          → error (0.7s) null
+
+C) KHÁM PHÁ 4 space mới (cpu-basic, không tốn hạn mức GPU)
+  ── dongnguyen95/VieNeu-TTS-v3-Turbo-Web [OK]
+     endpoints: []
+     catalog lớn nhất (10 mục): ['Ngọc Lan', 'Gia Bảo', 'Thái Sơn', 'Đức Trí', 'Mỹ Duyên', 'Trúc Ly', 'Xuân Vĩnh', 'Trọng Hữu', 'Bình An', 'Ngọc Linh']
+     /info → api_name=None params=[]
+     không có named_endpoints — space có thể gradio cũ, thử bỏ qua
+  ── nguyenduc1222/VieNeu-TTS [OK]
+     endpoints: [(0, 'load_example'), (1, 'update_count'), (2, 'update_ref_preview'), (3, 'update_ref_preview_1'), (4, 'set_preset_mode'), (5, 'set_custom_mode'), (6, 'synthesize_speech')]
+     catalog lớn nhất (9 mục): ['Tuyên (nam miền Bắc)', 'Vĩnh (nam miền Nam)', 'Bình (nam miền Bắc)', 'Nguyên (nam miền Nam)', 'Sơn (nam miền Nam)', 'Đoan (nữ miền Nam)', 'Ngọc (nữ miền Bắc)', 'Ly (nữ miền Bắc)', 'Dung (nữ miền Nam)']
+     /info → api_name='synthesize_speech' params=[({'type': 'string'}, ''), ({'type': 'string', 'enum': ['Tuyên (nam miền Bắc)', 'Vĩnh (nam miền Nam)', 'Bình (nam miền Bắc)', 'Nguyên (nam miền Nam)', 'Sơn (nam miền Nam)', 'Đoan (nữ miền Nam)', 'Ngọc (nữ miền Bắc)', 'Ly (nữ miền Bắc)', 'Dung (nữ miền Nam)']}, ''), ({'$defs': {'FileDataMeta': {'properties': {'_type': {'const': 'gradio.FileData', 'title': 'Type', 'type': 'string'}}, 'required': ['_type'], 'title': 'FileDataMeta', 'type': 'object'}}, 'properties': {'path': {'title': 'Path', 'type': 'string'}, 'url': {'anyOf': [{'type': 'string'}, {'type': 'null'}], 'default': None, 'title': 'Url'}, 'size': {'anyOf': [{'type': 'integer'}, {'type': 'null'}], 'default': None, 'title': 'Size'}, 'orig_name': {'anyOf': [{'type': 'string'}, {'type': 'null'}], 'default': None, 'title': 'Orig Name'}, 'mime_type': {'anyOf': [{'type': 'string'}, {'type': 'null'}], 'default': None, 'title': 'Mime Type'}, 'is_stream': {'default': False, 'title': 'Is Stream', 'type': 'boolean'}, 'meta': {'$ref': '#/$defs/FileDataMeta'}}, 'required': ['path'], 'title': 'FileData', 'type': 'object', 'additional_description': 'The FileData class is a subclass of the GradioModel class that represents a file object within a Gradio interface. It is used to store file data and metadata when a file is uploaded.\n\nAttributes:\n    path: The server file path where the file is stored.\n    url: The normalized server URL pointing to the file.\n    size: The size of the file in bytes.\n    orig_name: The original filename before upload.\n    mime_type: The MIME type of the file.\n    is_stream: Indicates whether the file is a stream.\n    meta: Additional metadata used internally (should not be changed).'}, ''), ({'type': 'string'}, '')]
+     ❌ GỌI THẬT voice='Ngọc (nữ miền Bắc)' → error (0.6s) null
+  ── whatvn/vietnamese-tts [OK]
+     endpoints: [(0, 'predict'), (1, 'js_fn'), (2, 'js_fn_1'), (3, 'load_example')]
+     catalog lớn nhất (0 mục): []
+     /info → api_name='predict' params=[({'properties': {'path': {'title': 'Path', 'type': 'string'}, 'url': {'anyOf': [{'type': 'string'}, {'type': 'null'}], 'default': None, 'title': 'Url'}, 'size': {'anyOf': [{'type': 'integer'}, {'type': 'null'}], 'default': None, 'title': 'Size'}, 'orig_name': {'anyOf': [{'type': 'string'}, {'type': 'null'}], 'default': None, 'title': 'Orig Name'}, 'mime_type': {'anyOf': [{'type': 'string'}, {'type': 'null'}], 'default': None, 'title': 'Mime Type'}, 'is_stream': {'default': False, 'title': 'Is Stream', 'type': 'boolean'}, 'meta': {'default': {'_type': 'gradio.FileData'}, 'title': 'Meta', 'type': 'object'}}, 'required': ['path'], 'title': 'FileData', 'type': 'object', 'additional_description': 'The FileData class is a subclass of the GradioModel class that represents a file object within a Gradio interface. It is used to store file data and metadata when a file is uploaded.\n\nAttributes:\n    path: The server file path where the file is stored.\n    url: The normalized server URL pointing to the file.\n    size: The size of the file in bytes.\n    orig_name: The original filename before upload.\n    mime_type: The MIME type of the file.\n    is_stream: Indicates whether the file is a stream.\n    meta: Additional metadata used internally (should not be changed).'}, ''), ({'type': 'string'}, ''), ({'type': 'string'}, ''), ({'type': 'number', 'description': 'numeric value between 0.3 and 2.0'}, '')]
+  ── Tuananh20015/vieneu-tts [/config HTTP 503]
+
+==========================================================================

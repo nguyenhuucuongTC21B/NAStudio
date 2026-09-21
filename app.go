@@ -647,6 +647,10 @@ type CloudProviderInfo struct {
 // CloudProviders trả toàn bộ dịch vụ đúng thứ tự chuỗi (13 từ FIX54) + trạng thái hiện tại
 // (đã nhớ từ snapshot settings) để UI vẽ bảng trạng thái.
 func (a *App) CloudProviders() []CloudProviderInfo {
+	// PATCH FIX57: nút "Làm mới" = xóa trạng thái tạm (cooldown/cạn hạn mức
+	// từ lần lỗi trước) để thẻ Dịch vụ Online phản ánh đúng sức khoẻ HIỆN
+	// TẠI khi user chủ động kiểm tra — các space ZeroGPU hồi phục theo cơn.
+	a.cloudChain.BeginUserRun()
 	reg := cloud.Registry()
 	out := make([]CloudProviderInfo, 0, len(reg))
 	for _, d := range reg {
@@ -692,6 +696,11 @@ func (a *App) CloudSynthesize(text, voiceName string) string {
 	a.mu.Unlock()
 
 	diagf("cloud %s: nhận yêu cầu ONLINE · voice=%q · %d ký tự", jobID, voiceName, len([]rune(text)))
+	// PATCH FIX57: mỗi lần user bấm Chuyển đổi là 1 ý định thử lại rõ ràng —
+	// xóa cooldown/cạn-hạn-mức lưu sẵn để chuỗi LUÔN gọi thật (hết case
+	// "(đã thử 0)": mọi dịch vụ bị bỏ qua vì trạng thái cũ dù space đã
+	// hồi phục; probe 05:01 chứng minh pnnbao chết 04:04 sống lại 05:01).
+	a.cloudChain.BeginUserRun()
 	go a.runCloudSynthesis(ctx, jobID, text, voiceName)
 	return jobID
 }

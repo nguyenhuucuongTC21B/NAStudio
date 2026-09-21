@@ -286,21 +286,23 @@ func TestRegistryShapeAndVoiceResolve(t *testing.T) {
 	reg := Registry()
 	// PATCH FIX56: 12 dịch vụ — Smrfhdl bị gỡ (cần đăng nhập HF);
 	// DevTam05 + hongqminh được NÂNG LÊN ĐẦU chuỗi (probe 2026-09-21).
-	if len(reg) != 12 {
-		t.Fatalf("registry must have exactly 12 providers, got %d", len(reg))
+	// PATCH FIX57: 13 dịch vụ — thêm hf-nguyenduc1222 (dự phòng cùng họ
+	// hongqminh, cpu-basic; probe 05:04 complete 1,6s).
+	if len(reg) != 13 {
+		t.Fatalf("registry must have exactly 13 providers, got %d", len(reg))
 	}
 	if reg[0].ID != "vieneu-io" || reg[1].ID != "hf-devtam05" || reg[2].ID != "hf-hongqminh" {
 		t.Fatalf("wrong head order: %s %s %s", reg[0].ID, reg[1].ID, reg[2].ID)
 	}
-	if reg[3].ID != "hf-pnnbao-ump" || reg[4].ID != "arena-thomcles" {
-		t.Fatalf("wrong order: %s %s", reg[3].ID, reg[4].ID)
+	if reg[3].ID != "hf-nguyenduc1222" || reg[4].ID != "hf-pnnbao-ump" || reg[5].ID != "arena-thomcles" {
+		t.Fatalf("wrong order: %s %s %s", reg[3].ID, reg[4].ID, reg[5].ID)
 	}
 	for _, d := range reg {
 		if d.ID == "hf-smrfhdl" {
 			t.Fatalf("Smrfhdl phải bị gỡ khỏi chuỗi (cần đăng nhập HF)")
 		}
 	}
-	if reg[4].SkipReason == "" {
+	if reg[5].SkipReason == "" {
 		t.Fatalf("arena must carry SkipReason")
 	}
 	for _, d := range reg {
@@ -308,7 +310,7 @@ func TestRegistryShapeAndVoiceResolve(t *testing.T) {
 			t.Fatalf("incomplete desc: %+v", d)
 		}
 	}
-	d := Registry()[6] // eagle0019
+	d := Registry()[7] // eagle0019 (FIX57: lùi 1 vị trí vì thêm nguyenduc1222)
 	if len(d.Voices) == 0 || d.Voices[0].Name == "" {
 		t.Fatalf("eagle0019 must have probed voices")
 	}
@@ -526,5 +528,79 @@ func TestODVoicesInvariant(t *testing.T) {
 	}
 	if cpu < 2 {
 		t.Fatalf("cần ≥2 giọng OD có trên dịch vụ CPU (eagle0019/Tuananh20015), got %d", cpu)
+	}
+}
+
+// TestChainBeginUserRunClearsSkip (PATCH FIX57): sau 1 lần hỏng, lần chạy
+// kế tiếp bị cooldown bỏ qua (chính là case "(đã thử 0)" user gặp); sau
+// BeginUserRun (user chủ động bấm Chuyển đổi/Làm mới lại) chuỗi phải GỌI
+// THẬT trở lại vì space ZeroGPU hồi phục theo cơn.
+func TestChainBeginUserRunClearsSkip(t *testing.T) {
+	calls := &atomic.Int32{}
+	srv := fakeGradioFull(t, "error", calls)
+	defer srv.Close()
+
+	c := testChain()
+	c.reg = []Desc{
+		{ID: "dead", Label: "Dead", Kind: "gradio", Base: srv.URL, API: "synthesize",
+			DataStyle: "template", DefaultVoice: "V"},
+	}
+	// Run 1: lỗi thường → cooldown 5 phút
+	if _, err1 := c.Synthesize(context.Background(), newHTTP(), Request{Text: "x"}, nil); err1 == nil {
+		t.Fatalf("run 1 phải lỗi")
+	}
+	// Run 2: đang cooldown → bị bỏ qua, không request mới ("đã thử 0")
+	before := calls.Load()
+	if _, err2 := c.Synthesize(context.Background(), newHTTP(), Request{Text: "x"}, nil); err2 == nil {
+		t.Fatalf("run 2 phải lỗi (bỏ qua do cooldown)")
+	}
+	if got := calls.Load() - before; got != 0 {
+		t.Fatalf("run 2 không được gọi thêm (cooldown): + %d", got)
+	}
+	// BeginUserRun (PATCH FIX57) → phải gọi thật trở lại
+	c.BeginUserRun()
+	if _, err3 := c.Synthesize(context.Background(), newHTTP(), Request{Text: "x"}, nil); err3 == nil {
+		t.Fatalf("run 3 vẫn phải lỗi (fake vẫn error) nhưng phải được GỌI")
+	}
+	if got := calls.Load() - before; got != 1 {
+		t.Fatalf("sau BeginUserRun phải gọi thật thêm đúng 1 lần, got +%d", got)
+	}
+}
+
+// TestChainVoiceNotAvailNoCooldown (PATCH FIX57): vieneu.io 400
+// "is not available" → trạng thái err nhưng KHÔNG cooldown — dịch vụ còn
+// sống, lần chạy sau (giọng khác) vẫn phải dùng được ngay.
+func TestChainVoiceNotAvailNoCooldown(t *testing.T) {
+	calls := &atomic.Int32{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/tts/demo", func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"statusCode":400,"message":"Voice \"Thái Sơn\" is not available","error":"Bad Request"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := testChain()
+	c.reg = []Desc{
+		{ID: "vieneu-io", Label: "vieneu.io", Kind: "vieneuio", Base: srv.URL,
+			API: "/api/tts/demo", DefaultVoice: "A",
+			// có giọng trong catalog để đi qua bộ lọc giọng của chuỗi
+			Voices: []Voice{{Name: "Thái Sơn"}}},
+	}
+	_, err := c.Synthesize(context.Background(), newHTTP(), Request{Text: "x", VoiceName: "Thái Sơn"}, nil)
+	if err == nil {
+		t.Fatalf("phải lỗi khi demo từ chối giọng")
+	}
+	if !IsVoiceNotAvailable(err) {
+		t.Fatalf("lỗi phải mang sentinel voiceNotAvailErr: %v", err)
+	}
+	if st := c.StatusOf("vieneu-io"); st.CooldownUntil != 0 {
+		t.Fatalf("giọng-tạm-chưa-có KHÔNG được đặt cooldown (PATCH FIX57), got %d", st.CooldownUntil)
+	}
+	// lần 2 vẫn được gọi thật (không bị skip oan)
+	_, _ = c.Synthesize(context.Background(), newHTTP(), Request{Text: "x", VoiceName: "Thái Sơn"}, nil)
+	if calls.Load() != 2 {
+		t.Fatalf("lần 2 phải được gọi thật (2 request), got %d", calls.Load())
 	}
 }

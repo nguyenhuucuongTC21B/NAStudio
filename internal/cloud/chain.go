@@ -59,6 +59,25 @@ func (c *Chain) SnapshotJSON() string {
 	return string(b)
 }
 
+// BeginUserRun — PATCH FIX57: người dùng vừa CHỦ ĐỘNG bấm "Chuyển đổi"
+// hoặc nút "Làm mới" → xóa toàn bộ trạng thái tạm (cooldown 5 phút + cạn
+// hạn mức) để chuỗi LUÔN gọi thử thật ít nhất 1 lần mỗi dịch vụ trong run
+// này. Nguyên nhân: probe 2026-09-21 05:01 chứng minh các space ZeroGPU
+// chập chờn THEO CƠN (pnnbao-ump chết lúc 04:04, sống lại 05:01; cùng 1
+// space cùng phút — Mai Anh complete 2,8s trong khi Quang Sơn error) nên
+// trạng thái "vừa lỗi" từ lần chạy trước KHÔNG đáng tin để bỏ qua. Không
+// xóa LastGood (vẫn ưu tiên dịch vụ thành công gần nhất), không đụng bộ
+// đếm ngày. Hết lượt thật (429) sẽ bị đánh dấu lại ngay trong run nếu
+// server vẫn từ chối — chỉ tốn đúng 1 request kiểm tra.
+func (c *Chain) BeginUserRun() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, st := range c.snap.Providers {
+		st.CooldownUntil = 0
+		st.ExhaustedUntil = ""
+	}
+}
+
 func (c *Chain) today() string { return c.nowFn().Format("2006-01-02") }
 
 // state lấy trạng thái của 1 dịch vụ, tự reset bộ đếm sang ngày mới.
@@ -225,6 +244,19 @@ func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv
 		}
 
 		lastErr = err
+		// PATCH FIX57: lỗi "giọng tạm chưa có" (vieneu.io 400) KHÔNG đặt
+		// cooldown — dịch vụ còn sống, giọng khác của lần chạy sau vẫn dùng
+		// được ngay; nếu cooldown thì lần thử giọng khác lại bị bỏ qua oan.
+		if IsVoiceNotAvailable(err) {
+			c.mu.Lock()
+			st := c.state(d.ID)
+			st.Status, st.Err = "err", err.Error()
+			c.mu.Unlock()
+			emitEv(onEv, Event{Phase: "fail", ProviderID: d.ID, Label: d.Label,
+				Message: d.Label + " lỗi: " + err.Error(),
+				Pct:     basePct + 4, ElapsedSec: time.Since(started).Seconds()})
+			continue
+		}
 		if IsQuota(err) {
 			c.mu.Lock()
 			st := c.state(d.ID)
@@ -279,7 +311,11 @@ func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv
 	// PATCH FIX56: khi chuỗi đã lọc theo giọng và VẪN hỏng hết → gợi ý
 	// người dùng rõ nguyên nhân + lối thoát (giọng khác / chờ chủ space).
 	if filtered && r.VoiceName != "" {
-		return Result{}, fmt.Errorf("tất cả dịch vụ có giọng %q đều không thành công (đã thử %d). Giọng này hiện chỉ có trên các dịch vụ đang lỗi — thử lại sau, chọn giọng khác (vd giọng OD) hoặc dùng chế độ Offline. Lỗi cuối: %w", r.VoiceName, tried, lastErr)
+		// PATCH FIX57: thông điệp sát thật hơn — các space ZeroGPU chập chờn
+		// theo cơn (probe58b: cùng space cùng phút, 1 giọng OK giọng lỗi) nên
+		// khuyên thử lại NGAY thay vì gợi ý giọng khác (riêng giọng OD thì
+		// gợi ý "giọng OD khác" là vô nghĩa).
+		return Result{}, fmt.Errorf("tất cả dịch vụ có giọng %q đều không thành công (đã thử %d). Các Server này đang chập chờn theo cơn — bấm Chuyển đổi thử lại NGAY (lần sau thường được), hoặc chọn giọng khác, hoặc dùng chế độ Offline. Lỗi cuối: %w", r.VoiceName, tried, lastErr)
 	}
 	return Result{}, fmt.Errorf("tất cả dịch vụ online đều không thành công (đã thử %d). Lỗi cuối: %w", tried, lastErr)
 }

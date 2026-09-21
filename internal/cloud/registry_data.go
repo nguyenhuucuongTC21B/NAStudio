@@ -180,6 +180,19 @@ var voicesHongqminh = []string{
 
 // default hf-hongqminh: 'Tuyên (nam miền Bắc)'
 
+// PATCH FIX57: voicesNguyenduc1222 — catalog giọng của Space
+// nguyenduc1222/VieNeu-TTS (value Literal thật từ /info; probe 2026-09-21
+// 05:04: synthesize_speech 5 tham số → complete 1,6s với 'Ngọc (nữ miền
+// Bắc)'). Cùng họ hongqminh — dự phòng cho 6 giọng vùng miền khi hongqminh
+// chập chờn, cộng thêm 3 giọng miền Nam (Nguyên/Sơn/Dung).
+var voicesNguyenduc1222 = []string{
+	"Tuyên (nam miền Bắc)", "Vĩnh (nam miền Nam)", "Bình (nam miền Bắc)",
+	"Nguyên (nam miền Nam)", "Sơn (nam miền Nam)", "Đoan (nữ miền Nam)",
+	"Ngọc (nữ miền Bắc)", "Ly (nữ miền Bắc)", "Dung (nữ miền Nam)",
+}
+
+// default hf-nguyenduc1222: 'Tuyên (nam miền Bắc)'
+
 // voicesDevTam05 — catalog giọng của Space DevTam05/vieneu-tts
 // (value gradio thật; FIX54: 2/2 giọng đã tổng hợp thật thành công).
 var voicesDevTam05 = []string{
@@ -200,5 +213,6 @@ var voiceTables = map[string][]string{
 	"voicesSmrfhdl":          nil, // FIX56: đã gỡ khỏi chuỗi (cần đăng nhập HF)
 	"voicesTuananh20015":     voicesTuananh20015,
 	"voicesHongqminh":        voicesHongqminh,
+	"voicesNguyenduc1222":    voicesNguyenduc1222,
 	"voicesDevTam05":         voicesDevTam05,
 }

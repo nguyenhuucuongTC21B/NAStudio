@@ -1,0 +1,50 @@
+==========================================================================
+PROBE57 — 2026-09-21 04:23:07
+Câu hỏi: vì sao FIX54 (13 bước, không lọc giọng) vẫn có vài giọng đọc bình thường?
+==========================================================================
+
+PHẦN 1 — HF runtime status
+  pnnbao-ump/VieNeu-TTS-v3-Turbo                stage=RUNNING      hw=zero-a10g
+  trangmin11101996/VieNeu-TTS-v3-Turbo          stage=RUNNING      hw=zero-a10g
+  eagle0019/VieNeu-TTS-v3-Turbo                 stage=RUNNING      hw=cpu-basic
+  xtieps/VieNeu-TTS-v3-Turbo                    stage=RUNNING      hw=zero-a10g
+  thienan2146/VieNeu-TTS-v3-Turbo               stage=RUNNING      hw=zero-a10g
+  Smrfhdl/tts                                   stage=RUNNING      hw=zero-a10g
+  doremon102/VieNeu-TTS-v3-Turbo                stage=RUNNING      hw=zero-a10g
+  kabinz/VieNeu-TTS-v3-Turbo                    stage=RUNNING      hw=zero-a10g
+  Tuananh20015/VieNeu-TTS-v3-Turbo              stage=RUNNING      hw=cpu-basic
+  hongqminh/VieNeu-TTS                          stage=RUNNING      hw=cpu-basic
+  DevTam05/vieneu-tts                           stage=RUNNING      hw=cpu-basic
+
+PHẦN 2 — vienеu.io host CŨ www.vieneu.io (bước #1 của FIX54)
+  POST https://www.vieneu.io/api/tts/demo → HTTP 201 (1.9s) audioBase64=236860 chars — VẪN SỐNG ''
+  POST https://vieneu.io/api/tts/demo → HTTP 404 (0.5s)  b'{"statusCode":404,"message":"Cannot GET /api/tts/demo","error":"Not Found","traceId":"9f108bdc-c6b5-4ae3-a290-fda8454cf8fa"}'
+
+PHẦN 3 — api.vieneu.io (FIX56 bước #1): snapshot giọng app đang nhận
+  Adam Tốp Tốp         HTTP 201 — audioBase64 248380 chars ✅
+  Ngọc Lan             HTTP 201 — audioBase64 291900 chars ✅
+  Mai Anh              HTTP 400 — {"statusCode":400,"message":"Voice \"Mai Anh\" is not available","error":"Bad Request","traceId":"5c8ccf0797923fce308439
+  Minh Đức             HTTP 201 — audioBase64 327740 chars ✅
+  Ngọc Trân            HTTP 400 — {"statusCode":400,"message":"Voice \"Ngọc Trân\" is not available","error":"Bad Request","traceId":"447590d3320d7a04f
+  Quang Sơn            HTTP 400 — {"statusCode":400,"message":"Voice \"Quang Sơn\" is not available","error":"Bad Request","traceId":"2731be3efb4da435dcc
+  Thùy Dung            HTTP 201 — audioBase64 212540 chars ✅
+  Minh Triết           HTTP 400 — {"statusCode":400,"message":"Voice \"Minh Triết\" is not available","error":"Bad Request","traceId":"4af25f1c242fb9170
+  Thái Sơn             HTTP 400 — {"statusCode":400,"message":"Voice \"Thái Sơn\" is not available","error":"Bad Request","traceId":"30f520b6d26fd50f13b
+  Ngọc Linh            HTTP 400 — {"statusCode":400,"message":"Voice \"Ngọc Linh\" is not available","error":"Bad Request","traceId":"f9ea327b3980d652c7
+  Mạnh Dũng            HTTP 201 — audioBase64 288060 chars ✅
+  → NHẬN ĐƯỢC (5/11): ['Adam Tốp Tốp', 'Ngọc Lan', 'Minh Đức', 'Thùy Dung', 'Mạnh Dũng']
+
+PHẦN 4 — gọi thật từng space (đúng giao thức app dùng)
+  [hongqminh] /config OK — endpoints: [(0, 'load_example'), (1, 'load_example_1'), (2, 'update_count'), (3, 'update_ref_preview'), (4, 'update_ref_preview_1'), (5, 'set_preset_mode'), (6, 'set_custom_mode'), (7, 'synthesize_speech')]
+  [hongqminh] catalog giọng hiện tại: ['Tuyên (nam miền Bắc)', 'Vĩnh (nam miền Nam)', 'Bình (nam miền Bắc)', 'Đoan (nữ miền Nam)', 'Ngọc (nữ miền Bắc)', 'Ly (nữ miền Bắc)']
+  [hongqminh] catalog voice='Ngọc (nữ miền Bắc)'         → error (0.7s) null
+  [hongqminh] catalog voice='Tuyên (nam miền Bắc)'       → error (0.6s) null
+  [hongqminh] GIỌNG LẠ (không trong catalog) voice='Minh Đức'                   → error (0.6s) null
+  [eagle0019     ] voice='Ngọc Linh'        → complete (18.3s) https://eagle0019-vieneu-tts-v3-turbo.hf.space/gradio_api/file=/tmp/gradio/e6d0d7fd056d3b2
+  [Tuananh20015  ] voice='Ngọc Lan'         → complete (3.5s) https://tuananh20015-vieneu-tts-v3-turbo.hf.space/gradio_api/file=/tmp/gradio/8ab0e2586ced
+  [pnnbao-ump    ] voice='Minh Quân Pro'    → error (0.7s) null
+  [DevTam05] /config HTTP 200
+  [DevTam05] voice='Nam Minh (Nam)' → complete (0.9s)  | 17136B magic=MP3
+
+==========================================================================
+KẾT LUẬN SỐ: xem phần tổng hợp ở cuối log.

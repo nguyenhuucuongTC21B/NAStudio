@@ -4,12 +4,28 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 )
+
+// PATCH FIX57: voiceNotAvailErr đánh dấu lỗi TẠM THỜI "giọng chưa được
+// worker nạp" (vieneu.io demo 400 + "is not available"). Dịch vụ CÒN SỐNG
+// — chỉ giọng này chưa có lúc đó (tập giọng demo xoay vòng) — nên chuỗi
+// KHÔNG được đặt cooldown cho dịch vụ (lỗi khác ví 429 vẫn cooldown như cũ).
+type voiceNotAvailErr struct{ err error }
+
+func (e voiceNotAvailErr) Error() string { return e.err.Error() }
+func (e voiceNotAvailErr) Unwrap() error { return e.err }
+
+// IsVoiceNotAvailable kiểm tra lỗi có phải dạng "giọng tạm chưa có" không.
+func IsVoiceNotAvailable(err error) bool {
+	var v voiceNotAvailErr
+	return errors.As(err, &v)
+}
 
 // httpx client dùng chung — User-Agent tử tế, không cache.
 func newHTTP() *http.Client {
@@ -72,7 +88,8 @@ func synthVieneuIO(ctx context.Context, hc *http.Client, d Desc, r Request) (Res
 		// cùng giọng 5 phút trước còn OK). Thông điệp rõ ràng để UI/
 		// người dùng hiểu là nhảy dịch vụ, không phải hỏng vĩnh viễn.
 		if resp.StatusCode == http.StatusBadRequest && strings.Contains(string(body), "is not available") {
-			return Result{}, fmt.Errorf("%s: giọng %q chưa có trên demo lúc này (tập giọng demo thay đổi theo thời điểm) — tự động chuyển dịch vụ kế tiếp", d.Label, voice)
+			// PATCH FIX57: bọc sentinel — chuỗi sẽ KHÔNG cooldown dịch vụ này.
+			return Result{}, voiceNotAvailErr{fmt.Errorf("%s: giọng %q chưa có trên demo lúc này (tập giọng demo thay đổi theo thời điểm) — tự động chuyển dịch vụ kế tiếp", d.Label, voice)}
 		}
 		return Result{}, classifyHTTP(resp.StatusCode, string(body), d)
 	}

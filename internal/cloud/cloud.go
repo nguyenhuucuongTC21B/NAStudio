@@ -148,6 +148,13 @@ func Registry() []Desc {
 			Note: "CPU thường — chập chờn trong probe 2026-09-21 (1 lần OK, phần còn lại lỗi tức thì).",
 		},
 		{
+			// PATCH FIX57: dự phòng cùng họ hongqminh — probe 05:04 complete 1,6s.
+			ID: "hf-nguyenduc1222", Label: "HF · nguyenduc1222/VieNeu-TTS", Kind: "gradio",
+			Base: "https://nguyenduc1222-vieneu-tts.hf.space", API: "synthesize_speech",
+			DataStyle: "speech5", DefaultVoice: "Tuyên (nam miền Bắc)", Voices: voicesOf("voicesNguyenduc1222"),
+			Note: "CPU thường — cùng họ hongqminh, 9 giọng (thêm Nguyên/Sơn/Dung miền Nam); probe 2026-09-21: complete 1,6s.",
+		},
+		{
 			ID: "hf-pnnbao-ump", Label: "HF · pnnbao-ump/VieNeu-TTS-v3-Turbo", Kind: "gradio",
 			Base: "https://pnnbao-ump-vieneu-tts-v3-turbo.hf.space", API: "synthesize",
 			DataStyle: "template", DefaultVoice: "Minh Quân Pro", Voices: voicesOf("voicesPnnbaoUmp"),
