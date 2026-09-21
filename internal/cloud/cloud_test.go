@@ -284,17 +284,23 @@ func TestSnapshotRoundTrip(t *testing.T) {
 
 func TestRegistryShapeAndVoiceResolve(t *testing.T) {
 	reg := Registry()
-	// PATCH FIX54: 10 dịch vụ gốc + 3 dịch vụ CPU mới = 13
-	if len(reg) != 13 {
-		t.Fatalf("registry must have exactly 13 providers, got %d", len(reg))
+	// PATCH FIX56: 12 dịch vụ — Smrfhdl bị gỡ (cần đăng nhập HF);
+	// DevTam05 + hongqminh được NÂNG LÊN ĐẦU chuỗi (probe 2026-09-21).
+	if len(reg) != 12 {
+		t.Fatalf("registry must have exactly 12 providers, got %d", len(reg))
 	}
-	if reg[10].ID != "hf-tuananh20015" || reg[11].ID != "hf-hongqminh" || reg[12].ID != "hf-devtam05" {
-		t.Fatalf("wrong tail order: %s %s %s", reg[10].ID, reg[11].ID, reg[12].ID)
+	if reg[0].ID != "vieneu-io" || reg[1].ID != "hf-devtam05" || reg[2].ID != "hf-hongqminh" {
+		t.Fatalf("wrong head order: %s %s %s", reg[0].ID, reg[1].ID, reg[2].ID)
 	}
-	if reg[0].ID != "vieneu-io" || reg[1].ID != "hf-pnnbao-ump" || reg[2].ID != "arena-thomcles" {
-		t.Fatalf("wrong order: %s %s %s", reg[0].ID, reg[1].ID, reg[2].ID)
+	if reg[3].ID != "hf-pnnbao-ump" || reg[4].ID != "arena-thomcles" {
+		t.Fatalf("wrong order: %s %s", reg[3].ID, reg[4].ID)
 	}
-	if reg[2].SkipReason == "" {
+	for _, d := range reg {
+		if d.ID == "hf-smrfhdl" {
+			t.Fatalf("Smrfhdl phải bị gỡ khỏi chuỗi (cần đăng nhập HF)")
+		}
+	}
+	if reg[4].SkipReason == "" {
 		t.Fatalf("arena must carry SkipReason")
 	}
 	for _, d := range reg {
@@ -302,7 +308,7 @@ func TestRegistryShapeAndVoiceResolve(t *testing.T) {
 			t.Fatalf("incomplete desc: %+v", d)
 		}
 	}
-	d := Registry()[4] // eagle0019
+	d := Registry()[6] // eagle0019
 	if len(d.Voices) == 0 || d.Voices[0].Name == "" {
 		t.Fatalf("eagle0019 must have probed voices")
 	}
@@ -314,9 +320,28 @@ func TestRegistryShapeAndVoiceResolve(t *testing.T) {
 	if v != d.DefaultVoice {
 		t.Fatalf("unknown voice should fallback to default, got %q", v)
 	}
-	// vieneu.io phải có đúng 10 giọng featured thật
-	if len(Registry()[0].Voices) != 10 {
-		t.Fatalf("vieneu.io featured must be 10, got %d", len(Registry()[0].Voices))
+	// PATCH FIX56: vieneu.io = 10 featured + 23 giọng app − 1 trùng
+	// ("Anh Khôi") = 32; đồng thời Base phải là api.vieneu.io (host mới)
+	vi := Registry()[0]
+	if len(vi.Voices) != 32 {
+		t.Fatalf("vieneu.io catalog must be 32 (10 featured + 23 app − 1 dup), got %d", len(vi.Voices))
+	}
+	if vi.Base != "https://api.vieneu.io" {
+		t.Fatalf("vieneu.io Base must be api.vieneu.io (API dời subdomain), got %s", vi.Base)
+	}
+	seen := map[string]bool{}
+	for _, v := range vi.Voices {
+		if seen[v.Name] {
+			t.Fatalf("vieneu.io catalog trùng tên: %s", v.Name)
+		}
+		seen[v.Name] = true
+	}
+	// 8 giọng OD phải nằm trong catalog vieneu.io (đưa dịch vụ #1 vào
+	// chuỗi cho mọi giọng OD)
+	for _, od := range ODVoices() {
+		if !vi.HasVoice(od.Name) {
+			t.Fatalf("giọng OD %q thiếu trong catalog vieneu.io", od.Name)
+		}
 	}
 }
 
@@ -368,9 +393,11 @@ func TestChainVoiceFilter(t *testing.T) {
 	}
 }
 
-// TestChainVoiceUnknownFallsBack: giọng lạ (không có trong catalog nào) →
-// giữ hành vi cũ: đi cả chuỗi theo thứ tự (dịch vụ đầu thành công là dừng).
-func TestChainVoiceUnknownFallsBack(t *testing.T) {
+// TestChainVoiceUnknownFailsFast (PATCH FIX56 — đổi hành vi từ FIX55):
+// giọng lạ (không nằm trong catalog của dịch vụ nào) → BÁO LỖI NGAY,
+// không gọi request nào. Lý do: chạy chuỗi với "giọng gần đúng" (mặc định
+// của từng dịch vụ) khiến người dùng nghe SAI giọng mà không hay biết.
+func TestChainVoiceUnknownFailsFast(t *testing.T) {
 	calls := &atomic.Int32{}
 	srv := fakeGradioFull(t, "ok", calls)
 	defer srv.Close()
@@ -383,18 +410,76 @@ func TestChainVoiceUnknownFallsBack(t *testing.T) {
 			DataStyle: "template", DefaultVoice: "V",
 			Voices: []Voice{{Name: "Ngọc Linh"}}},
 	}
-	var infos []string
-	res, err := c.Synthesize(context.Background(), newHTTP(),
+	var fails []string
+	_, err := c.Synthesize(context.Background(), newHTTP(),
 		Request{Text: "test", VoiceName: "Giọng Lạ"}, func(e Event) {
-			if e.Phase == "info" {
-				infos = append(infos, e.Message)
+			if e.Phase == "fail" {
+				fails = append(fails, e.Message)
 			}
 		})
-	if err != nil || res.ProviderID != "first" {
-		t.Fatalf("giọng lạ phải đi cả chuỗi (first thành công trước), got %s err=%v", res.ProviderID, err)
+	if err == nil {
+		t.Fatalf("giọng lạ phải báo lỗi (không chạy chuỗi sai giọng)")
 	}
-	if len(infos) != 1 || !strings.Contains(infos[0], "Không dịch vụ nào khai báo") {
-		t.Fatalf("thiếu cảnh báo giọng lạ: %v", infos)
+	if calls.Load() != 0 {
+		t.Fatalf("không được gọi request nào với giọng lạ, got %d", calls.Load())
+	}
+	if len(fails) != 1 || !strings.Contains(fails[0], "không có trên bất kỳ dịch vụ online nào") {
+		t.Fatalf("thiếu event fail giải thích: %v", fails)
+	}
+	if !strings.Contains(err.Error(), "8 giọng OD") {
+		t.Fatalf("thông điệp lỗi phải gợi ý giọng OD: %v", err)
+	}
+}
+
+// TestChainFilteredAllFailHint (PATCH FIX56): giọng CHỈ có trên dịch vụ
+// đang lỗi → lỗi cuối phải gợi ý rõ "chọn giọng khác / thử lại sau".
+func TestChainFilteredAllFailHint(t *testing.T) {
+	calls := &atomic.Int32{}
+	srv := fakeGradioFull(t, "error", calls)
+	defer srv.Close()
+
+	c := testChain()
+	c.reg = []Desc{
+		{ID: "dead", Label: "Dead", Kind: "gradio", Base: srv.URL, API: "synthesize",
+			DataStyle: "template", DefaultVoice: "V",
+			Voices: []Voice{{Name: "Thái Sơn"}}},
+		{ID: "novoice", Label: "NoVoice", Kind: "gradio", Base: srv.URL, API: "synthesize",
+			DataStyle: "template", DefaultVoice: "V"},
+	}
+	_, err := c.Synthesize(context.Background(), newHTTP(),
+		Request{Text: "test", VoiceName: "Thái Sơn"}, nil)
+	if err == nil {
+		t.Fatalf("chuỗi phải lỗi khi dịch vụ duy nhất có giọng hỏng")
+	}
+	if !strings.Contains(err.Error(), "Thái Sơn") || !strings.Contains(err.Error(), "chọn giọng khác") {
+		t.Fatalf("lỗi cuối thiếu gợi ý FIX56: %v", err)
+	}
+	// dịch vụ KHÔNG có giọng không được bị gọi (bộ lọc vẫn hoạt động)
+	if calls.Load() != 1 {
+		t.Fatalf("chỉ được gọi dịch vụ có giọng (1), got %d", calls.Load())
+	}
+}
+
+// TestVieneuIOVoiceNotAvailable (PATCH FIX56): 400 + "is not available"
+// phải trả thông điệp TẠM THỜI rõ ràng, KHÔNG phải quota.
+func TestVieneuIOVoiceNotAvailable(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/tts/demo", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"statusCode":400,"message":"Voice \"Thái Sơn\" is not available","error":"Bad Request"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	d := Desc{ID: "vieneu-io", Label: "vieneu.io", Base: srv.URL, API: "/api/tts/demo", DefaultVoice: "A"}
+	_, err := synthVieneuIO(context.Background(), newHTTP(), d, Request{Text: "x", VoiceName: "Thái Sơn"})
+	if err == nil {
+		t.Fatalf("phải lỗi khi demo từ chối giọng")
+	}
+	if IsQuota(err) {
+		t.Fatalf("không được xếp là quota: %v", err)
+	}
+	if !strings.Contains(err.Error(), "chưa có trên demo lúc này") {
+		t.Fatalf("thiếu thông điệp tạm thời FIX56: %v", err)
 	}
 }
 

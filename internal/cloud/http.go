@@ -66,6 +66,14 @@ func synthVieneuIO(ctx context.Context, hc *http.Client, d Desc, r Request) (Res
 	// hợp lệ (probe 2026-09-20 — FIX53 chỉ nhận 200 nên luôn bỏ dịch vụ đầu
 	// tiên của chuỗi). Chấp nhận toàn bộ dải 2xx.
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		// PATCH FIX56: demo vieneu.io từ chối giọng không nằm trong
+		// nhóm đang được worker nạp (400 + "Voice … is not available")
+		// — đây là trạng thái TẠM THỜI theo thời điểm (probe 56f/56i:
+		// cùng giọng 5 phút trước còn OK). Thông điệp rõ ràng để UI/
+		// người dùng hiểu là nhảy dịch vụ, không phải hỏng vĩnh viễn.
+		if resp.StatusCode == http.StatusBadRequest && strings.Contains(string(body), "is not available") {
+			return Result{}, fmt.Errorf("%s: giọng %q chưa có trên demo lúc này (tập giọng demo thay đổi theo thời điểm) — tự động chuyển dịch vụ kế tiếp", d.Label, voice)
+		}
 		return Result{}, classifyHTTP(resp.StatusCode, string(body), d)
 	}
 	var out struct {
@@ -175,8 +183,15 @@ func synthGradio(ctx context.Context, hc *http.Client, d Desc, r Request, onEv f
 	if code != http.StatusOK || len(audio) == 0 {
 		return Result{}, fmt.Errorf("tải audio HTTP %d", code)
 	}
+	// PATCH FIX56: MIME theo phần mở rộng thật của URL — DevTam05 trả
+	// .mp3 (không phải .wav như các space template); ghi sai MIME làm
+	// bước giải mã sau này chọn nhầm đường đọc.
+	mime := "audio/wav"
+	if strings.Contains(strings.ToLower(audioURL), ".mp3") {
+		mime = "audio/mpeg"
+	}
 	return Result{
-		Audio: audio, MIME: "audio/wav",
+		Audio: audio, MIME: mime,
 		ProviderID: d.ID, ProviderLabel: d.Label, VoiceUsed: voice,
 		Info: strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(info+infoNote), "·")),
 	}, nil

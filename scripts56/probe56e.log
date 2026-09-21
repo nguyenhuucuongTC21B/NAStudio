@@ -1,0 +1,49 @@
+A) runtime từng space (parallel):
+  05chatgpt/vietnamese-tts                         BUILD_ERROR  gradio/?             2025-04-02
+  Arrcttacsrks/VieNeu-TTS-Run-On-CPU               RUNTIME_ERROR docker/?             2025-12-11
+  anhnt1289/tts-vietnamese                         RUNTIME_ERROR gradio/?             2025-11-24
+  daviius/VieNeu-TTS                               SLEEPING     gradio/?             2025-12-12
+  dongnguyen95/VieNeu-TTS-v3-Turbo-Web             RUNNING      gradio/cpu-basic     2026-06-14 <<<
+  doremon102/VieNeu-TTS-v3-Turbo                   RUNNING      gradio/zero-a10g     2026-09-06 <<<
+  eagle0019/VieNeu-TTS-v3-Turbo                    RUNNING      gradio/cpu-basic     2026-06-16 <<<
+  fdsbk204/VieNeu-TTS-0.3B                         SLEEPING     gradio/?             2026-01-10
+  hongqminh/VieNeu-TTS                             RUNNING      gradio/cpu-basic     2026-04-15 <<<
+  hungnk221/VieNeu-TTS                             SLEEPING     gradio/?             2026-08-21
+  hungthai84/VieNeuTTS-Platfrom                    SLEEPING     gradio/?             2026-07-01
+  kabinz/VieNeu-TTS-v3-Turbo                       RUNNING      gradio/zero-a10g     2026-09-17 <<<
+  namnguyenpat/vieneu-tts                          BUILD_ERROR  gradio/?             2026-01-28
+  ndk8386/vieneu-tts-api                           RUNTIME_ERROR docker/?             2026-06-16
+  ngocquy0201/vieneu-tts                           BUILD_ERROR  docker/?             2026-03-28
+  nguyenduc1222/VieNeu-TTS                         RUNNING      gradio/cpu-basic     2025-12-12 <<<
+  phan-kim-tu/VieNeu-TTS-v3-Turbo                  PAUSED       gradio/?             2026-07-12
+  phucsd/vieneu-tts-kaggle                         PAUSED       gradio/?             2026-09-18
+  pnnbao-ump/VieNeu-TTS-v3-Turbo                   RUNNING      gradio/zero-a10g     2026-09-17 <<<
+  Smrfhdl/tts                                      RUNNING      gradio/zero-a10g     2026-09-14 <<<
+  Tuananh20015/VieNeu-TTS-v3-Turbo                 RUNNING      gradio/cpu-basic     2026-06-15 <<<
+  trangmin11101996/VieNeu-TTS-v3-Turbo             RUNNING      gradio/zero-a10g     2026-09-08 <<<
+  vipsphi/VieNeu-TTS-0.3B                          RUNTIME_ERROR gradio/?             2026-01-10
+  xtieps/VieNeu-TTS-v3-Turbo                       RUNNING      gradio/zero-a10g     2026-08-03 <<<
+  thienan2146/VieNeu-TTS-v3-Turbo                  RUNNING      gradio/zero-a10g     2026-08-20 <<<
+  vinhzdz192/TTS-VIETNAMESE                        RUNTIME_ERROR docker/?             2025-10-25
+  whatvn/vietnamese-tts                            RUNNING      gradio/cpu-basic     2025-04-02 <<<
+  DevTam05/vieneu-tts                              RUNNING      docker/cpu-basic     2026-01-29 <<<
+  michsethowusu/VieNeu-TTS-Twi-Demo                PAUSED       docker/?             2026-06-03
+  trinhvanhung/vietnamese-tts                      SLEEPING     gradio/?             2025-04-02
+  phanphuc2609/vietnamese-tts-server               RUNTIME_ERROR docker/?             2025-10-25
+  thao2005/vietnamese-tts-v1                       SLEEPING     docker/?             2026-05-04
+
+B) probe end-to-end space RUNNING:
+  dongnguyen95/VieNeu-TTS-v3-Turbo-Web             [RUNNING]   1.1s deps không tên: 0
+  doremon102/VieNeu-TTS-v3-Turbo                   [RUNNING]   3.2s error → "404: Not Found"
+  eagle0019/VieNeu-TTS-v3-Turbo                    [RUNNING]   3.4s error → "404: Not Found"
+  hongqminh/VieNeu-TTS                             [RUNNING]   3.1s error → "404: Not Found"
+  kabinz/VieNeu-TTS-v3-Turbo                       [RUNNING]   3.0s error → "404: Not Found"
+  nguyenduc1222/VieNeu-TTS                         [RUNNING]   4.0s error → "404: Not Found"
+  pnnbao-ump/VieNeu-TTS-v3-Turbo                   [RUNNING]   3.9s error → "404: Not Found"
+  Smrfhdl/tts                                      [RUNNING]   3.4s error → "404: Not Found"
+  Tuananh20015/VieNeu-TTS-v3-Turbo                 [RUNNING]   3.5s error → "404: Not Found"
+  trangmin11101996/VieNeu-TTS-v3-Turbo             [RUNNING]   3.0s error → "404: Not Found"
+  xtieps/VieNeu-TTS-v3-Turbo                       [RUNNING]   3.1s error → "404: Not Found"
+  thienan2146/VieNeu-TTS-v3-Turbo                  [RUNNING]   3.0s error → "404: Not Found"
+  whatvn/vietnamese-tts                            [RUNNING]   1.0s không syn endpoint: ['predict', 'js_fn', 'js_fn_1', 'load_example']
+  DevTam05/vieneu-tts                              [RUNNING]   2.7s OK ✅ ep=synthesize params=2 voices=2 → 

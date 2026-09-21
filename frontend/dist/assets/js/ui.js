@@ -650,7 +650,8 @@
     state.cloudProviders.forEach((p, idx) => {
       const row = document.createElement("div");
       row.className = "cloud-row-item";
-      row.title = p.skipReason || p.note || p.err || "";
+      // PATCH FIX56: đang lỗi thì ưu tiên HIỂN THỊ nguyên nhân lỗi ngay trên tooltip
+      row.title = (p.status === "err" && p.err) ? p.err : (p.skipReason || p.note || p.err || "");
       const dot = document.createElement("span");
       dot.className = "cloud-dot " + (dotClass[p.status] || "unknown");
       const meta = document.createElement("span");

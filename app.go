@@ -742,10 +742,12 @@ func (a *App) runCloudSynthesis(ctx context.Context, jobID, text, voiceName stri
 		a.pushJob(jobID, "error", "Không ghi được file tạm audio: "+werr.Error(), 0)
 		return
 	}
-	samples, sr, _, rerr := dsp.ReadWav(tmpWav)
+	// PATCH FIX56: ReadAudioFile nhận biết WAV + MP3 (DevTam05 trả MP3;
+	// trước đây chỉ đọc WAV nên job chết ở bước giải mã dù tổng hợp OK).
+	samples, sr, _, rerr := dsp.ReadAudioFile(tmpWav)
 	_ = os.Remove(tmpWav)
 	if rerr != nil || len(samples) == 0 {
-		diagf("[error] cloud %s: decode WAV lỗi (%v) · mime=%s · %d bytes", jobID, rerr, res.MIME, len(res.Audio))
+		diagf("[error] cloud %s: decode audio lỗi (%v) · mime=%s · %d bytes", jobID, rerr, res.MIME, len(res.Audio))
 		a.pushJob(jobID, "error", "Audio nhận về không đọc được (mime: "+res.MIME+")", 0)
 		a.toast("error", "Chế độ online thất bại", "Dịch vụ trả audio không đọc được — đã dừng để bảo toàn dữ liệu.")
 		return

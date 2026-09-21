@@ -1,0 +1,24 @@
+bundle: /home/z/my-project/scripts/vieneu_bundle_1789961262.js (2579310 chars)
+  [tts/demo] …th&&be(se.voices),se!=null&&se.counts&&ye(se.counts)}catch{}})(),()=>{Z=!0}},[]);const qt=m.useCallback(async()=>{if(!G.trim()||H==="loading")return;J("loading"),B(null);const Z=new AbortController,q=setTimeout(()=>Z.abort(),ez);try{const Ce=await fetch("/api/tts/demo",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:G.trim(),voiceId:ae}),signal:Z.signal});if(!Ce.ok)throw new Error("failed");const{audioBase64:se,mimeType:we}=await Ce.json(),ct=new Blob([Uint8Array.from(atob(se),At=>At.ch…
+  [tts/stream] …,i=[];let l=0,c=!1,u=!1;const h=[];let p=0,f=!1,g=!1;const _=()=>{if(!u){u=!0,h.length=0,r.abort();for(const N of i)try{N.stop()}catch{}a.close().catch(()=>{})}};return(async()=>{var N,w,j,k;try{const C=localStorage.getItem("accessToken"),A=await fetch(`${uF}/tts/stream`,{method:"POST",headers:{"Content-Type":"application/json",...C?{Authorization:`Bearer ${C}`}:{}},body:JSON.stringify({text:e.text,voiceId:e.voiceId,emotion:e.emotion??"natural",language:e.language??"vi-VN",speed:e.speed??1,...e.engine?{engine:e.engine}:{},..…
+  [v1/tts] …el:"API topic ID (tin gom lô API)",admin_telegram_api_topic_hint:"Trống → dùng Voice topic",admin_voices_tab_api_usage:"Sử dụng API",admin_voices_channel_filter_label:"Nguồn",admin_voices_channel_all:"Tất cả nguồn",admin_voices_channel_api_note:"Chỉ job POST /v1/tts mới có bản ghi ở đây. Các route API đồng bộ (clone, speech, dialogue, dub, srt, upload) không tạo bản ghi — xem tab",admin_api_usage_title:"Sử dụng API",admin_api_usage_subtitle:"Mỗi lượt gọi /v1 của một user hoặc một API key: route, giọng, ký tự, token, thời…
+  [tts/audio] ….phonemes,generate:async e=>(await ie.post("/tts/generate",e)).data,getJobStatus:async e=>(await ie.get(`/tts/status/${e}`)).data,getLibrary:async(e=1,n=20)=>(await ie.get("/tts/library",{params:{page:e,limit:n}})).data,deleteAudio:async e=>{await ie.delete(`/tts/audio/${e}`)},getActiveJobs:async()=>{try{return(await ie.get("/tts/jobs/active")).data??[]}catch{return[]}},getHistory:async(e=100)=>{try{return(await ie.get("/tts/library",{params:{limit:e}})).data.items.map(a=>({id:a.id,text:a.text,voiceId:a.voiceId,language:a.l…
+
+B) demo API trên api.vieneu.io:
+  POST https://api.vieneu.io/api/tts/demo: HTTP 201 — b'{"audioBase64":"UklGRuTTAgBXQVZFZm10IBAAAAABAAEAgLsAAAB3AQACABAAZGF0YcDTAgAAAAAAAAD//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+  POST https://vieneu.io/api/tts/demo: HTTP 404 — b'{"statusCode":404,"message":"Cannot GET /api/tts/demo","error":"Not Found","traceId":"6f6cc234-4d96-4f76-9ace-e02b0c39029c"}'
+  POST https://api.vieneu.io/api/v1/tts: HTTP 401 — b'{"statusCode":401,"message":"API key required. Pass it as \\"Authorization: Bearer <key>\\", \\"X-API-Key: <key>\\", or \xe2\x80\x94 from Vapi, whose config cannot set either \xe2\x80\x94 the assistant\'s `server.secret`, which arrives as \\"X-'
+
+C) eagle0019 — thử biến thể:
+  [session_hash] SSE HTTP 200 — 'event: error\ndata: "404: Not Found"\n\n'
+  [origin+session] SSE HTTP 200 — 'event: error\ndata: "404: Not Found"\n\n'
+  [browser-headers] SSE HTTP 200 — 'event: error\ndata: "404: Not Found"\n\n'
+
+D) retest DevTam05:
+  DevTam05: HTTP 200, complete=True — 'event: complete\ndata: [{"path": "/tmp/gradio/d7efbe7e32c497dec2871a6e32db69aba38707692ab96f8bff7718ef51f432d7/171cbabeb275e30f.mp3", "url": "https://devtam05-vieneu-tts.hf.space/gr'
+
+E) retest hongqminh (synthes speech 4p):
+  hongqminh: HTTP 200, complete=False — 'event: error\ndata: null\n\n'
+
+F) pnnbao-ump (ZeroGPU) — thử session_hash:
+  pnnbao: HTTP 200 — 'event: error\ndata: "404: Not Found"\n\n'

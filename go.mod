@@ -5,6 +5,7 @@ go 1.23.0
 require (
 	github.com/braheezy/shine-mp3 v0.2.0
 	github.com/go-ole/go-ole v1.3.0
+	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/wailsapp/wails/v2 v2.10.1
 	golang.org/x/sys v0.30.0
 )

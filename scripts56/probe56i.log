@@ -1,0 +1,11 @@
+PROBE56i — dò id hoạt động cho TỪNG giọng app trên demo vieneu.io (2026-09-21)
+Tổng hợp kết quả: chạy ~40 lượt demo (mỗi giọng thử lần lượt từng entry id trong catalog).
+KẾT QUẢ: 0/25 giọng map được — TẤT CẢ trả 400 (kể cả Mạnh Dũng/Phạm Tuyên/Thùy Dung
+vừa 201 trong probe56h vài phút trước) + header X-RateLimit-Remaining giảm mạnh
+→ kết luận: (1) demo giới hạn 50 lượt/~7h/IP tính cả request bị từ chối;
+(2) tập giọng demo chấp nhận XOAY VÒNG theo trạng thái worker — không thể
+mapping cứng name→id. Về code: vieneu-io giữ catalog 23 giọng app + lỗi
+"is not available" được hiểu là TẠM THỜI → nhảy dịch vụ tức thì.
+Bằng chứng chi tiết: probe56f.log (Thái Sơn/Ngọc Linh/Mai Anh 400 ngay khi
+probe56h còn thấy Mạnh Dũng/Phạm Tuyên/Thùy Dung/Ngọc Lan/Minh Đức 201),
+probe56h.log (định danh engine/group từng giọng), vieneu_voice_map.json.

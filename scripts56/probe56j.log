@@ -1,0 +1,13 @@
+A) retest 3 space CPU (session_hash, đầy đủ 9 tham số):
+  eagle0019/VieNeu-TTS-v3-Turbo                0.9s POST HTTP 422
+  Tuananh20015/VieNeu-TTS-v3-Turbo             0.7s POST HTTP 422
+  hongqminh/VieNeu-TTS                         0.8s POST HTTP 422
+
+B) whatvn/vietnamese-tts — /info predict:
+  /predict: ['ref_audio_orig', 'ref_text', 'gen_text', 'speed']
+    ref_audio_orig: filepath default=None
+    ref_text: str default=None
+    gen_text: str default=None
+    speed: float default=1.0
+  thử predict data=[None, 'Xin chào thử nghiệm tiếng Việt.', 'Xin chào thử nghiệm tiếng Việt.', 1.0]
+  predict → POST HTTP 422

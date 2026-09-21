@@ -258,34 +258,36 @@
       async ListSessions() { return []; },
       // PATCH FIX53: mock chế độ online — mô phỏng chuỗi: vieneu.io hết
       // lượt → space kế lỗi → space sau thành công (giúp thiết kế UI).
+      // PATCH FIX56: thứ tự mới theo probe thật — DevTam05/hongqminh nâng
+      // lên đầu; Smrfhdl gỡ (cần đăng nhập HF); vieneu.io host mới.
       async CloudProviders() {
         return [
           { id: "vieneu-io", label: "vieneu.io (chính thức)", kind: "vieneuio", status: "unknown", countToday: 0, defaultVoice: "Adam Tốp Tốp",
-            note: "API demo công khai của trang chính thức.", voices: ["Adam Tốp Tốp", "Duyên Hà My", "Đăng Quân", "Bình Bon", "My Méo"].map(n => ({ name: n })) },
+            note: "API demo chính thức (host mới api.vieneu.io) — nhanh; giới hạn 50 lượt/~7 giờ; tập giọng demo nhận thay đổi theo thời điểm.", voices: ["Adam Tốp Tốp", "Duyên Hà My", "Đăng Quân", "Bình Bon", "My Méo", "Mai Anh", "Minh Đức", "Ngọc Linh", "Thái Sơn", "Thùy Dung", "Minh Triết", "Quang Sơn", "Ngọc Trân", "Mạnh Dũng"].map(n => ({ name: n })) },
+          { id: "hf-devtam05", label: "HF · DevTam05/vieneu-tts", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Nam Minh (Nam)",
+            note: "CPU thường — dịch vụ ổn định nhất trong probe 2026-09-21.", voices: ["Hoài My (Nữ)", "Nam Minh (Nam)"].map(n => ({ name: n })) },
+          { id: "hf-hongqminh", label: "HF · hongqminh/VieNeu-TTS", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Tuyên (nam miền Bắc)",
+            note: "CPU thường — chập chờn trong probe 2026-09-21.", voices: ["Tuyên (nam miền Bắc)", "Vĩnh (nam miền Nam)", "Bình (nam miền Bắc)", "Đoan (nữ miền Nam)", "Ngọc (nữ miền Bắc)", "Ly (nữ miền Bắc)"].map(n => ({ name: n })) },
           { id: "arena-thomcles", label: "HF · Thomcles/yodalingua-tts-arena", kind: "arena", status: "skip", countToday: 0,
             skipReason: "Chỉ phục vụ bỏ phiếu mù — không có API tạo giọng.", voices: [] },
           { id: "hf-eagle0019", label: "HF · eagle0019/VieNeu-TTS-v3-Turbo", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Ngọc Linh",
-            voices: ["Ngọc Lan", "Gia Bảo", "Thái Sơn", "Trúc Ly", "Ngọc Linh"].map(n => ({ name: n })) },
-          // PATCH FIX54: mock thêm 3 dịch vụ CPU (xương sống ổn định)
+            note: "Đang lỗi ứng dụng (probe 2026-09-21) — lỗi trả tức thì.", voices: ["Ngọc Lan", "Gia Bảo", "Thái Sơn", "Trúc Ly", "Ngọc Linh"].map(n => ({ name: n })) },
+          // PATCH FIX54: mock thêm dịch vụ CPU (xương sống ổn định)
           { id: "hf-tuananh20015", label: "HF · Tuananh20015/VieNeu-TTS-v3-Turbo", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Ngọc Lan",
-            note: "CPU thường — KHÔNG tốn hạn mức GPU, 10/10 giọng đã kiểm chứng.", voices: ["Ngọc Lan", "Gia Bảo", "Thái Sơn", "Đức Trí", "Mỹ Duyên", "Trúc Ly", "Xuân Vĩnh", "Trọng Hữu", "Bình An", "Ngọc Linh"].map(n => ({ name: n })) },
-          { id: "hf-hongqminh", label: "HF · hongqminh/VieNeu-TTS", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Tuyên (nam miền Bắc)",
-            note: "CPU thường — không tốn hạn mức GPU.", voices: ["Tuyên (nam miền Bắc)", "Vĩnh (nam miền Nam)", "Bình (nam miền Bắc)", "Đoan (nữ miền Nam)", "Ngọc (nữ miền Bắc)", "Ly (nữ miền Bắc)"].map(n => ({ name: n })) },
-          { id: "hf-devtam05", label: "HF · DevTam05/vieneu-tts", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Nam Minh (Nam)",
-            note: "CPU thường — không tốn hạn mức GPU.", voices: ["Hoài My (Nữ)", "Nam Minh (Nam)"].map(n => ({ name: n })) },
+            note: "CPU thường — đang lỗi ứng dụng (probe 2026-09-21).", voices: ["Ngọc Lan", "Gia Bảo", "Thái Sơn", "Đức Trí", "Mỹ Duyên", "Trúc Ly", "Xuân Vĩnh", "Trọng Hữu", "Bình An", "Ngọc Linh"].map(n => ({ name: n })) },
         ];
       },
       // PATCH FIX55: mock bộ 8 giọng OD (đồng bộ internal/cloud/od.go)
       async CloudODVoices() {
         return [
-          { name: "Mai Anh", gender: "Nữ", region: "Bắc", style: "Tin tức", note: "Nữ miền Bắc · tin tức — 7/13 dịch vụ" },
-          { name: "Minh Đức", gender: "Nam", region: "Bắc", style: "Tin tức", note: "Nam miền Bắc · tin tức — 5/13 dịch vụ" },
+          { name: "Mai Anh", gender: "Nữ", region: "Bắc", style: "Tin tức", note: "Nữ miền Bắc · tin tức — có trên vieneu.io + 7 dịch vụ" },
+          { name: "Minh Đức", gender: "Nam", region: "Bắc", style: "Tin tức", note: "Nam miền Bắc · tin tức — có trên vieneu.io + 5 dịch vụ" },
           { name: "Ngọc Trân", gender: "Nữ", region: "Trung", style: "Tự nhiên", note: "Nữ miền Trung — giọng Trung duy nhất" },
           { name: "Quang Sơn", gender: "Nam", region: "Trung", style: "Tự nhiên", note: "Nam miền Trung — giọng Trung duy nhất" },
-          { name: "Thùy Dung", gender: "Nữ", region: "Nam", style: "Tin tức", note: "Nữ miền Nam · tin tức — 7/13 dịch vụ" },
+          { name: "Thùy Dung", gender: "Nữ", region: "Nam", style: "Tin tức", note: "Nữ miền Nam · tin tức — có trên vieneu.io + 7 dịch vụ" },
           { name: "Minh Triết", gender: "Nam", region: "Nam", style: "Tin tức", note: "Nam miền Nam · tin tức" },
-          { name: "Thái Sơn", gender: "Nam", region: "Nam", style: "Kể chuyện", note: "Nam kể chuyện — có trên cả 2 dịch vụ CPU" },
-          { name: "Ngọc Linh", gender: "Nữ", region: "Bắc", style: "Kể chuyện", note: "Nữ kể chuyện — có trên cả 2 dịch vụ CPU" },
+          { name: "Thái Sơn", gender: "Nam", region: "Nam", style: "Kể chuyện", note: "Nam kể chuyện — có trên cả dịch vụ CPU" },
+          { name: "Ngọc Linh", gender: "Nữ", region: "Bắc", style: "Kể chuyện", note: "Nữ kể chuyện — có trên cả dịch vụ CPU" },
         ];
       },
       async CloudSynthesize(text, voice) {
@@ -305,7 +307,7 @@
             const durationSec = Math.min(text.length / 14, 60) || 3;
             Bus.emitLocal("hcstudio:job", { id, state: "done", pct: 100, message: "Hoàn tất", durationSec });
             Bus.emitLocal("hcstudio:toast", { level: "success", title: "Chế độ online — hoàn tất",
-              message: `HF · eagle0019 · giọng ${voice || "mặc định"} · ${durationSec.toFixed(1)}s audio` });
+              message: `vieneu.io (chính thức) · giọng ${voice || "mặc định"} · ${durationSec.toFixed(1)}s audio` }); // FIX56: mock khớp dịch vụ đầu chuỗi mới
             fakePlayback(id, durationSec);
             return;
           }

@@ -13,6 +13,31 @@ package cloud
 //     (error:null — ZeroGPU chặn nặc danh); giá trị giọng vẫn ĐÚNG theo
 //     /config, dùng được từ IP nhà tới khi cạn hạn mức GPU ngày.
 // Dùng scripts/probe54.py + test54_voices.py để tái tạo.
+//
+// PATCH FIX56 (probe 2026-09-21 — nguyên nhân "tất cả dịch vụ đều fail"):
+//   - vieneu.io DỜI API sang subdomain api.vieneu.io (vieneu.io/api trả
+//     404) — POST https://api.vieneu.io/api/tts/demo → 201 + WAV thật.
+//     Demo giới hạn X-RateLimit 50 lượt/~7 giờ/IP và TẬP GIỌNG NHẬN THAY
+//     ĐỔI THEO THỜI ĐIỂM (worker chỉ giữ 1 nhóm giọng nạp sẵn — 400
+//     "Voice … is not available" là TẠM THỜI, vài phút sau thử lại được).
+//   - GET https://api.vieneu.io/api/tts/voices?engine=v4 → catalog ĐẦY
+//     ĐỦ 1204 giọng (bản ghi có gender/region/description). 23/25 giọng
+//     catalog của app có mặt → đưa vào catalog của dịch vụ vieneu-io
+//     để bộ lọc giọng FIX55 đưa vieneu-io vào chuỗi cho mọi giọng app;
+//     nếu demo từ chối thì lỗi trả TỨC THÌ (~1s) và chuỗi nhảy dịch vụ
+//     kế tiếp — không treo.
+//   - 10 space dùng chung template (pnnbao-ump, trangmin, eagle0019,
+//     xtieps, thienan2146, doremon102, kabinz, Tuananh20015, hongqminh,
+//     nguyenduc1222): ĐANG LỖI ỨNG DỤNG với MỌI người — POST nhận
+//     event_id nhưng SSE trả "error: null" / "404: Not Found" trong ~1s
+//     (không phải chặn IP: DevTam05 cùng hạ tầng vẫn OK). Giữ trong chuỗi
+//     vì chủ space có thể khắc phục bất cứ lúc nào; lỗi trả nhanh nên
+//     không gây treo.
+//   - Smrfhdl/tts: giờ YÊU CẦU ĐĂNG NHẬP HF (access_status: "Trang này
+//     chỉ dành cho một số người") → BỎ KHỎI CHUỖI.
+//   - DevTam05: dịch vụ DUY NHẤT chạy ổn định suốt đợt probe → nâng lên
+//     vị trí số 2 trong chuỗi.
+// Bằng chứng: scripts/probe56_all.log … probe56j.log (kèm bộ FIX56).
 
 // featuredVoicesVieneuIO = 10 giọng featured từ GET /api/tts/voices/featured?engine=v4
 // (10/10 đã tổng hợp thật thành công ngày 2026-09-20).
@@ -27,6 +52,38 @@ var featuredVoicesVieneuIO = []Voice{
 	{Name: "Tưởng Vy", Gender: "female"},
 	{Name: "Mai Bé Phương", Gender: "female"},
 	{Name: "Anh Khôi", Gender: "male"},
+}
+
+// PATCH FIX56: 23/25 giọng catalog app được xác nhận NẰM TRONG catalog
+// đầy đủ 1204 giọng của vieneu.io (GET /api/tts/voices?engine=v4, probe
+// 2026-09-21). Demo chỉ nhận giọng đang được worker nạp sẵn nên mỗi tên
+// ở đây có thể 400 "is not available" TẠM THỜI — chuỗi hiểu và nhảy
+// dịch vụ kế tiếp tức thì. "Ngọc Huyền" và "Adam bựa" không có trong
+// catalog vieneu.io nên không đưa vào.
+var vieneuIOAppVoices = []string{
+	"Adam",
+	"Phạm Tuyên",
+	"Minh Đức",
+	"Thanh Bình",
+	"Trúc Ly",
+	"Đoan Trang",
+	"Ngọc Linh",
+	"Mai Anh",
+	"Quỳnh Anh",
+	"Quang Sơn",
+	"Ngọc Trân",
+	"Xuân Vĩnh",
+	"Thái Sơn",
+	"Minh Triết",
+	"Đức Trí",
+	"Thục Đoan",
+	"Thùy Dung",
+	"Mỹ Duyên",
+	"Kim Thanh",
+	"Anh Khôi",
+	"Minh Quân Pro",
+	"Thiền Tâm Đức",
+	"Mạnh Dũng",
 }
 
 // voicesPnnbaoUmp — catalog giọng của Space pnnbao-ump/VieNeu-TTS-v3-Turbo (value gradio thật).
@@ -102,18 +159,6 @@ var voicesKabinz = []string{
 
 // default hf-kabinz: 'Minh Quân Pro'
 
-// voicesSmrfhdl — catalog giọng của Space Smrfhdl/tts (value gradio thật).
-var voicesSmrfhdl = []string{
-	"Minh Đức", "Phạm Tuyên", "Thái Sơn", "Xuân Vĩnh",
-	"Thanh Bình", "Trúc Ly", "Ngọc Linh", "Đoan Trang",
-	"Mai Anh", "Thục Đoan", "Minh Triết", "Thùy Dung",
-	"Quang Sơn", "Ngọc Trân", "Mỹ Duyên", "Quỳnh Anh",
-	"Đức Trí", "Kim Thanh", "Ngọc Huyền", "Adam",
-	"Mạnh Dũng", "Minh Quân", "Anh Khôi",
-}
-
-// default hf-smrfhdl: 'Minh Đức'
-
 // ─── PATCH FIX54: 3 catalog MỚI (dịch vụ CPU, từng giọng đã kiểm chứng) ───
 
 // voicesTuananh20015 — catalog giọng của Space Tuananh20015/VieNeu-TTS-v3-Turbo
@@ -152,7 +197,7 @@ var voiceTables = map[string][]string{
 	"voicesThienan2146":      voicesThienan2146,
 	"voicesDoremon102":       voicesDoremon102,
 	"voicesKabinz":           voicesKabinz,
-	"voicesSmrfhdl":          voicesSmrfhdl,
+	"voicesSmrfhdl":          nil, // FIX56: đã gỡ khỏi chuỗi (cần đăng nhập HF)
 	"voicesTuananh20015":     voicesTuananh20015,
 	"voicesHongqminh":        voicesHongqminh,
 	"voicesDevTam05":         voicesDevTam05,

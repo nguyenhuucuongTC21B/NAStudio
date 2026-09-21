@@ -121,6 +121,7 @@ func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv
 		reg = Registry()
 	}
 	totalAll := len(reg)
+	filtered := false
 	// PATCH FIX55: lọc dịch vụ theo giọng yêu cầu (giữ nguyên thứ tự gốc).
 	if r.VoiceName != "" {
 		var with []Desc
@@ -131,14 +132,20 @@ func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv
 		}
 		if len(with) > 0 {
 			reg = with
+			filtered = true
 			emitEv(onEv, Event{Phase: "info", Label: r.VoiceName,
 				Message: fmt.Sprintf("Giọng %q có trên %d/%d dịch vụ — chỉ gửi tới các dịch vụ có đúng giọng này.",
 					r.VoiceName, len(with), totalAll),
 				Pct: 1, ElapsedSec: 0})
 		} else {
-			emitEv(onEv, Event{Phase: "info", Label: r.VoiceName,
-				Message: fmt.Sprintf("Không dịch vụ nào khai báo giọng %q — mỗi dịch vụ sẽ dùng giọng gần đúng của nó.", r.VoiceName),
-				Pct:     1, ElapsedSec: 0})
+			// PATCH FIX56: KHÔNG chạy chuỗi với "giọng gần đúng" nữa —
+			// người dùng sẽ nghe GIỌNG KHÁC mà không hay biết (đúng
+			// tên giọng là nguyên tắc của bộ lọc FIX55). Báo lỗi rõ
+			// ngay lập tức, không tốn một request nào.
+			msg := fmt.Sprintf("Giọng %q không có trên bất kỳ dịch vụ online nào của chuỗi — hãy chọn giọng khác (8 giọng OD là ổn định nhất) hoặc dùng chế độ Offline.", r.VoiceName)
+			emitEv(onEv, Event{Phase: "fail", Label: r.VoiceName,
+				Message: msg, Pct: 0, ElapsedSec: 0})
+			return Result{}, fmt.Errorf("%s", msg)
 		}
 	}
 	total := len(reg)
@@ -268,6 +275,11 @@ func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv
 
 	if lastErr == nil {
 		lastErr = fmt.Errorf("không còn dịch vụ online nào khả dụng trong chuỗi")
+	}
+	// PATCH FIX56: khi chuỗi đã lọc theo giọng và VẪN hỏng hết → gợi ý
+	// người dùng rõ nguyên nhân + lối thoát (giọng khác / chờ chủ space).
+	if filtered && r.VoiceName != "" {
+		return Result{}, fmt.Errorf("tất cả dịch vụ có giọng %q đều không thành công (đã thử %d). Giọng này hiện chỉ có trên các dịch vụ đang lỗi — thử lại sau, chọn giọng khác (vd giọng OD) hoặc dùng chế độ Offline. Lỗi cuối: %w", r.VoiceName, tried, lastErr)
 	}
 	return Result{}, fmt.Errorf("tất cả dịch vụ online đều không thành công (đã thử %d). Lỗi cuối: %w", tried, lastErr)
 }

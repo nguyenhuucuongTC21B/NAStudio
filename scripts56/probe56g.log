@@ -1,0 +1,31 @@
+FULL catalog: HTTP 200 — 1204 giọng (keys=['id', 'name', 'description', 'gender', 'region', 'traits', 'sampleText', 'sampleAudioUrl', 'podcast', 'style', 'lang', 'group', 'engine'])
+  regions: {'north': 602, 'south': 341, 'central': 29, None: 232} | genders: {'male': 590, 'female': 614}
+  unique names: 730 — trùng tên: ['Adam', 'An Khang', 'An Nhiên', 'Anh Dũng', 'Anh Phi', 'Anh Thư', 'Bích Ngọc', 'Bạch Tuyết', 'Bảo Khánh', 'Bảo Long']
+  giọng app → catalog vieneu.io:
+    'Mai Anh'          → ✅ Mai Anh
+    'Minh Đức'         → ✅ Minh Đức
+    'Ngọc Trân'        → ✅ vieneu-5-000089
+    'Quang Sơn'        → ✅ vieneu-5-000087
+    'Thùy Dung'        → ✅ vieneu-1-000268
+    'Minh Triết'       → ✅ vieneu-1-000380
+    'Thái Sơn'         → ✅ Thái Sơn
+    'Ngọc Linh'        → ✅ Ngọc Linh
+    'Ngọc Lan'         → ✅ Ngọc Lan
+    'Minh Quân'        → ✅ vieneu-5-000026
+    'Phạm Tuyên'       → ✅ Phạm Tuyên
+    'Mạnh Dũng'        → ✅ Mạnh Dũng
+    'Trúc Ly'          → ✅ Ly
+    'Anh Khôi'         → ✅ Anh Khôi
+    'Ngọc Huyền'       → ❌ không có
+  mẫu nam Bắc tin tức: ['Minh Đức (vieneu-2-000494) — Nam · Bắc · Phong cách tin tức', 'Mạnh Dũng 1 (Mạnh Dũng 1) — Nam · Bắc · Tin tức, Chất lượng, Uy tín', 'Thái Duy Bình (Thái Duy Bình) — Nam · Bắc · Tin tức, Hoạt ngôn, Đưa tin, Truyền cảm']
+  mẫu nữ Bắc tin tức: ['Ban Mai (Ban Mai) — Nữ · Bắc · Tin tức, Rõ ràng', 'Châu Thảo (Châu Thảo) — Nữ · Bắc · Tin tức, Hoạt ngôn', 'Huyền My (Huyền My) — Nữ · Bắc · Hoạt ngôn, Tin tức, Chuẩn giọng']
+  mẫu kể chuyện nữ: ['Yến Ngọc Linh (vieneu-3-000049) — Giọng nữ kể chuyện duyên dáng, trầm ấm miền Bắc.', 'Liên Hương (vieneu-3-000048) — Giọng nữ trầm tự nhiên, phù hợp cho kể chuyện miền Bắc.', 'Linh Kỳ (vieneu-3-000054) — Giọng nữ kể chuyện tự nhiên, mềm mại, phù hợp với các tác phẩm văn học miền Bắc.']
+  mẫu kể chuyện nam: ['Anh Khôi (Anh Khôi) — Nam · Bắc · Kể chuyện, Cảm xúc, Truyền cảm', 'Trí Sáng (vieneu-3-000047) — Giọng nam trầm ấm, kỳ năng kể chuyện, miền Bắc.', 'Hùng Kể (vieneu-3-000052) — Giọng nam trầm ấm, phù hợp kể chuyện miền Bắc.']
+
+demo voiceId dạng ID vs NAME:
+  id của Minh Đức ('Minh Đức'): HTTP 201 — 183100 chars ✅
+  name 'Minh Đức' ('Minh Đức'): HTTP 201 — 97340 chars ✅
+  name 'Ngọc Lan' ('Ngọc Lan'): HTTP 201 — 137020 chars ✅
+  id của Ngọc Lan ('Ngọc Lan'): HTTP 201 — 135740 chars ✅
+
+đã lưu catalog → scripts/vieneu_full_voices_v4.json (698 KB)
