@@ -1,10 +1,21 @@
 package cloud
 
-// Code SINH TỰ ĐỘNG từ kết quả khảo sát thật ngày 2026-09-20 (FIX53) —
-// mỗi giọng là VALUE thật mà gradio Space chấp nhận (không phải label).
-// Dùng scripts/f53_probe_deep.py + f53_probe_values.py để tái tạo.
+// Code SINH TỰ ĐỘNG từ kết quả khảo sát thật ngày 2026-09-20.
+// FIX53: lần đầu sinh từ probe /config + /gradio_api/info.
+// PATCH FIX54: kiểm chứng TỪNG GIỌNG bằng tổng hợp thật (probe54.py):
+//   - vieneu.io 10/10 OK (~2s/giọng)  — lưu ý HTTP 201 đã được chấp nhận.
+//   - eagle0019 (cpu-basic) 10/10 OK (~20s/giọng).
+//   - Tuananh20015 (cpu-basic) 10/10 OK (~5s/giọng)   — MỚI.
+//   - hongqminh  (cpu-basic) 6/6 OK (~3.4s/giọng)     — MỚI.
+//   - DevTam05   (cpu-basic) 2/2 OK (~2.3s/giọng)     — MỚI.
+//   - 7 space ZeroGPU (pnnbao-ump, trangmin11101996, xtieps, thienan2146,
+//     doremon102, kabinz, Smrfhdl): từ IP datacenter probe trả lỗi tức thì
+//     (error:null — ZeroGPU chặn nặc danh); giá trị giọng vẫn ĐÚNG theo
+//     /config, dùng được từ IP nhà tới khi cạn hạn mức GPU ngày.
+// Dùng scripts/probe54.py + test54_voices.py để tái tạo.
 
 // featuredVoicesVieneuIO = 10 giọng featured từ GET /api/tts/voices/featured?engine=v4
+// (10/10 đã tổng hợp thật thành công ngày 2026-09-20).
 var featuredVoicesVieneuIO = []Voice{
 	{Name: "Adam Tốp Tốp", Gender: "male"},
 	{Name: "Duyên Hà My", Gender: "female"},
@@ -39,7 +50,8 @@ var voicesTrangmin11101996 = []string{
 
 // default hf-trangmin11101996: 'Minh Quân'
 
-// voicesEagle0019 — catalog giọng của Space eagle0019/VieNeu-TTS-v3-Turbo (value gradio thật).
+// voicesEagle0019 — catalog giọng của Space eagle0019/VieNeu-TTS-v3-Turbo
+// (value gradio thật; FIX54: 10/10 giọng đã tổng hợp thật thành công).
 var voicesEagle0019 = []string{
 	"Ngọc Lan", "Gia Bảo", "Thái Sơn", "Đức Trí",
 	"Mỹ Duyên", "Trúc Ly", "Xuân Vĩnh", "Trọng Hữu",
@@ -102,6 +114,35 @@ var voicesSmrfhdl = []string{
 
 // default hf-smrfhdl: 'Minh Đức'
 
+// ─── PATCH FIX54: 3 catalog MỚI (dịch vụ CPU, từng giọng đã kiểm chứng) ───
+
+// voicesTuananh20015 — catalog giọng của Space Tuananh20015/VieNeu-TTS-v3-Turbo
+// (value gradio thật; FIX54: 10/10 giọng đã tổng hợp thật thành công, ~5s/giọng).
+var voicesTuananh20015 = []string{
+	"Ngọc Lan", "Gia Bảo", "Thái Sơn", "Đức Trí",
+	"Mỹ Duyên", "Trúc Ly", "Xuân Vĩnh", "Trọng Hữu",
+	"Bình An", "Ngọc Linh",
+}
+
+// default hf-tuananh20015: 'Ngọc Lan'
+
+// voicesHongqminh — catalog giọng của Space hongqminh/VieNeu-TTS
+// (value gradio thật; FIX54: 6/6 giọng đã tổng hợp thật thành công).
+var voicesHongqminh = []string{
+	"Tuyên (nam miền Bắc)", "Vĩnh (nam miền Nam)", "Bình (nam miền Bắc)",
+	"Đoan (nữ miền Nam)", "Ngọc (nữ miền Bắc)", "Ly (nữ miền Bắc)",
+}
+
+// default hf-hongqminh: 'Tuyên (nam miền Bắc)'
+
+// voicesDevTam05 — catalog giọng của Space DevTam05/vieneu-tts
+// (value gradio thật; FIX54: 2/2 giọng đã tổng hợp thật thành công).
+var voicesDevTam05 = []string{
+	"Hoài My (Nữ)", "Nam Minh (Nam)",
+}
+
+// default hf-devtam05: 'Nam Minh (Nam)'
+
 // voiceTables — bảng tra tên biến → catalog (dùng bởi voicesOf).
 var voiceTables = map[string][]string{
 	"voicesPnnbaoUmp":        voicesPnnbaoUmp,
@@ -112,4 +153,7 @@ var voiceTables = map[string][]string{
 	"voicesDoremon102":       voicesDoremon102,
 	"voicesKabinz":           voicesKabinz,
 	"voicesSmrfhdl":          voicesSmrfhdl,
+	"voicesTuananh20015":     voicesTuananh20015,
+	"voicesHongqminh":        voicesHongqminh,
+	"voicesDevTam05":         voicesDevTam05,
 }

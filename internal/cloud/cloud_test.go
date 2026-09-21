@@ -281,8 +281,12 @@ func TestSnapshotRoundTrip(t *testing.T) {
 
 func TestRegistryShapeAndVoiceResolve(t *testing.T) {
 	reg := Registry()
-	if len(reg) != 10 {
-		t.Fatalf("registry must have exactly 10 providers, got %d", len(reg))
+	// PATCH FIX54: 10 dịch vụ gốc + 3 dịch vụ CPU mới = 13
+	if len(reg) != 13 {
+		t.Fatalf("registry must have exactly 13 providers, got %d", len(reg))
+	}
+	if reg[10].ID != "hf-tuananh20015" || reg[11].ID != "hf-hongqminh" || reg[12].ID != "hf-devtam05" {
+		t.Fatalf("wrong tail order: %s %s %s", reg[10].ID, reg[11].ID, reg[12].ID)
 	}
 	if reg[0].ID != "vieneu-io" || reg[1].ID != "hf-pnnbao-ump" || reg[2].ID != "arena-thomcles" {
 		t.Fatalf("wrong order: %s %s %s", reg[0].ID, reg[1].ID, reg[2].ID)

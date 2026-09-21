@@ -264,6 +264,13 @@
             skipReason: "Chỉ phục vụ bỏ phiếu mù — không có API tạo giọng.", voices: [] },
           { id: "hf-eagle0019", label: "HF · eagle0019/VieNeu-TTS-v3-Turbo", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Ngọc Linh",
             voices: ["Ngọc Lan", "Gia Bảo", "Thái Sơn", "Trúc Ly", "Ngọc Linh"].map(n => ({ name: n })) },
+          // PATCH FIX54: mock thêm 3 dịch vụ CPU (xương sống ổn định)
+          { id: "hf-tuananh20015", label: "HF · Tuananh20015/VieNeu-TTS-v3-Turbo", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Ngọc Lan",
+            note: "CPU thường — KHÔNG tốn hạn mức GPU, 10/10 giọng đã kiểm chứng.", voices: ["Ngọc Lan", "Gia Bảo", "Thái Sơn", "Đức Trí", "Mỹ Duyên", "Trúc Ly", "Xuân Vĩnh", "Trọng Hữu", "Bình An", "Ngọc Linh"].map(n => ({ name: n })) },
+          { id: "hf-hongqminh", label: "HF · hongqminh/VieNeu-TTS", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Tuyên (nam miền Bắc)",
+            note: "CPU thường — không tốn hạn mức GPU.", voices: ["Tuyên (nam miền Bắc)", "Vĩnh (nam miền Nam)", "Bình (nam miền Bắc)", "Đoan (nữ miền Nam)", "Ngọc (nữ miền Bắc)", "Ly (nữ miền Bắc)"].map(n => ({ name: n })) },
+          { id: "hf-devtam05", label: "HF · DevTam05/vieneu-tts", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Nam Minh (Nam)",
+            note: "CPU thường — không tốn hạn mức GPU.", voices: ["Hoài My (Nữ)", "Nam Minh (Nam)"].map(n => ({ name: n })) },
         ];
       },
       async CloudSynthesize(text, voice) {

@@ -40,7 +40,7 @@
     // PATCH FIX53: chế độ sử dụng online (cầu nối chuyển tiếp)
     mode: "offline",          // offline | online
     cloudVoice: "",           // "" = giọng mặc định từng dịch vụ
-    cloudProviders: [],       // bảng 10 dịch vụ + trạng thái
+    cloudProviders: [],       // bảng dịch vụ online + trạng thái (13 từ FIX54)
     cloudVoiceOptions: [],    // gộp catalog giọng của các dịch vụ
     durationSec: null,
     cursorMs: 0,

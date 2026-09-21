@@ -644,7 +644,7 @@ type CloudProviderInfo struct {
 	Voices       []cloud.Voice `json:"voices"`
 }
 
-// CloudProviders trả 10 dịch vụ đúng thứ tự chuỗi + trạng thái hiện tại
+// CloudProviders trả toàn bộ dịch vụ đúng thứ tự chuỗi (13 từ FIX54) + trạng thái hiện tại
 // (đã nhớ từ snapshot settings) để UI vẽ bảng trạng thái.
 func (a *App) CloudProviders() []CloudProviderInfo {
 	reg := cloud.Registry()

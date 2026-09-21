@@ -62,7 +62,10 @@ func synthVieneuIO(ctx context.Context, hc *http.Client, d Desc, r Request) (Res
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if resp.StatusCode != http.StatusOK {
+	// PATCH FIX54: vieneu.io thực tế trả HTTP 201 (Created) kèm audioBase64
+	// hợp lệ (probe 2026-09-20 — FIX53 chỉ nhận 200 nên luôn bỏ dịch vụ đầu
+	// tiên của chuỗi). Chấp nhận toàn bộ dải 2xx.
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return Result{}, classifyHTTP(resp.StatusCode, string(body), d)
 	}
 	var out struct {
@@ -186,8 +189,16 @@ func synthGradio(ctx context.Context, hc *http.Client, d Desc, r Request, onEv f
 //   - smrfhdl:  [text, voice, mode("cpu"), browserstate(nil)] — mode CPU
 //     KHÔNG tốn hạn mức GPU 300 giây/ngày của space này.
 func gradioData(d Desc, text, voice string) []any {
-	if d.DataStyle == "smrfhdl" {
+	// PATCH FIX54: thêm 2 dạng khảo sát được từ các Space CPU (không GPU
+	// quota) — speech2: [text, voice]; speech5: [text, voice, refAudio,
+	// customText, thamSốThứ5] (các phần sau nil).
+	switch d.DataStyle {
+	case "smrfhdl":
 		return []any{text, voice, "cpu", nil}
+	case "speech2":
+		return []any{text, voice}
+	case "speech5":
+		return []any{text, voice, nil, nil, nil}
 	}
 	return []any{text, voice, nil, 0.8, 25, 0.95, 1.2, 300, 256}
 }

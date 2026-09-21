@@ -1554,7 +1554,7 @@ body.mode-online .stream-live { display: none; }
                 </div>
             </section>
 
-            <!-- PATCH FIX53: bảng trạng thái 10 dịch vụ online (chỉ hiện ở chế độ online) -->
+            <!-- PATCH FIX53/FIX54: bảng trạng thái dịch vụ online (chỉ hiện ở chế độ online) -->
             <section class="card cloud-card" id="cloud-card" hidden>
                 <div class="card-head">
                     <h2><span class="dot-accent"></span> Dịch vụ Online</h2>
@@ -1564,6 +1564,8 @@ body.mode-online .stream-live { display: none; }
                 <small class="ref-clone-hint" style="padding:0 18px 14px; display:block;">
                     Thứ tự cầu nối: vieneu.io trước, rồi lần lượt các HF Space. Hết lượt / lỗi /
                     space đang ngủ → tự động chuyển dịch vụ kế tiếp và nhớ trạng thái đến hôm sau.
+                    <b>Các dịch vụ đánh dấu CPU thường (FIX54) không phụ thuộc hạn mức GPU —
+                    xương sống ổn định, gần như không giới hạn.</b>
                 </small>
             </section>
         </aside>

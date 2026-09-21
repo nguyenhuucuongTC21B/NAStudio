@@ -115,7 +115,8 @@ type Event struct {
 }
 
 // Registry trả danh sách dịch vụ ĐÚNG THỨ TỰ chủ app chỉ định:
-// vieneu.io trước, rồi các HF Space lần lượt. Arena Thomcles được liệt kê
+// vieneu.io trước, rồi các HF Space lần lượt; cuối chuỗi là 3 dịch vụ
+// CPU (PATCH FIX54) không phụ thuộc hạn mức GPU của ZeroGPU. Arena Thomcles được liệt kê
 // để UI thấy đủ 10 vị trí như yêu cầu, nhưng bị TỰ BỎ QUA trong chuỗi vì
 // trang chỉ phục vụ bỏ phiếu mù (pair có sẵn), không có API tạo giọng.
 func Registry() []Desc {
@@ -175,6 +176,27 @@ func Registry() []Desc {
 			ID: "hf-kabinz", Label: "HF · kabinz/VieNeu-TTS-v3-Turbo", Kind: "gradio",
 			Base: "https://kabinz-vieneu-tts-v3-turbo.hf.space", API: "synthesize",
 			DataStyle: "template", DefaultVoice: "Minh Quân Pro", Voices: voicesOf("voicesKabinz"),
+		},
+		// ─── PATCH FIX54: 3 dịch vụ CPU vừa khảo sát & kiểm chứng từng
+		// giọng (2026-09-20) — cpu-basic KHÔNG tốn hạn mức GPU nên là
+		// "xương sống" ổn định cho mục tiêu gần như không giới hạn.
+		{
+			ID: "hf-tuananh20015", Label: "HF · Tuananh20015/VieNeu-TTS-v3-Turbo", Kind: "gradio",
+			Base: "https://tuananh20015-vieneu-tts-v3-turbo.hf.space", API: "synthesize",
+			DataStyle: "template", DefaultVoice: "Ngọc Lan", Voices: voicesOf("voicesTuananh20015"),
+			Note: "CPU thường — KHÔNG tốn hạn mức GPU, 10/10 giọng đã kiểm chứng; space còn có chế độ hội thoại nhiều giọng.",
+		},
+		{
+			ID: "hf-hongqminh", Label: "HF · hongqminh/VieNeu-TTS", Kind: "gradio",
+			Base: "https://hongqminh-vieneu-tts.hf.space", API: "synthesize_speech",
+			DataStyle: "speech5", DefaultVoice: "Tuyên (nam miền Bắc)", Voices: voicesOf("voicesHongqminh"),
+			Note: "CPU thường — không tốn hạn mức GPU, 6/6 giọng đã kiểm chứng.",
+		},
+		{
+			ID: "hf-devtam05", Label: "HF · DevTam05/vieneu-tts", Kind: "gradio",
+			Base: "https://devtam05-vieneu-tts.hf.space", API: "synthesize",
+			DataStyle: "speech2", DefaultVoice: "Nam Minh (Nam)", Voices: voicesOf("voicesDevTam05"),
+			Note: "CPU thường — không tốn hạn mức GPU, 2/2 giọng đã kiểm chứng.",
 		},
 	}
 }
