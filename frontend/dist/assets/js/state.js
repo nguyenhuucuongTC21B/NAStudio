@@ -42,6 +42,8 @@
     cloudVoice: "",           // "" = giọng mặc định từng dịch vụ
     cloudProviders: [],       // bảng dịch vụ online + trạng thái (13 từ FIX54)
     cloudVoiceOptions: [],    // gộp catalog giọng của các dịch vụ
+    cloudOD: [],              // PATCH FIX55: 8 giọng ổn định (từ backend)
+    cloudODOnly: false,       // PATCH FIX55: checkbox "Chỉ giọng OD" (session)
     durationSec: null,
     cursorMs: 0,
     totalMs: 0,

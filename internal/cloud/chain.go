@@ -104,6 +104,14 @@ func (c *Chain) LastGoodID() string {
 
 // Synthesize chạy cầu nối: đi qua registry đúng thứ tự, bỏ qua dịch vụ
 // cạn lượt/lỗi cooldown/không hỗ trợ, gọi từng cái cho tới khi có audio.
+//
+// PATCH FIX55 — LỌC THEO GIỌNG: khi người dùng chọn một giọng cụ thể và
+// giọng đó có trong catalog của ít nhất một dịch vụ, chuỗi CHỈ ghé các
+// dịch vụ có đúng giọng đó. Lý do: probe55 (2026-09-21) chứng minh các
+// space TỪ CHỐI tên giọng ngoài catalog của chúng (error null) — nếu
+// gửi nhầm thì hoặc lỗi hoặc bị thay bằng giọng mặc định mà người dùng
+// không hay biết. Lọc trước vừa ĐÚNG GIỌNG vừa nhanh (bỏ qua tức thì
+// những dịch vụ không có giọng, không tốn một request nào).
 func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv func(Event)) (Result, error) {
 	if hc == nil {
 		hc = newHTTP()
@@ -111,6 +119,27 @@ func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv
 	reg := c.reg
 	if reg == nil {
 		reg = Registry()
+	}
+	totalAll := len(reg)
+	// PATCH FIX55: lọc dịch vụ theo giọng yêu cầu (giữ nguyên thứ tự gốc).
+	if r.VoiceName != "" {
+		var with []Desc
+		for _, d := range reg {
+			if d.HasVoice(r.VoiceName) {
+				with = append(with, d)
+			}
+		}
+		if len(with) > 0 {
+			reg = with
+			emitEv(onEv, Event{Phase: "info", Label: r.VoiceName,
+				Message: fmt.Sprintf("Giọng %q có trên %d/%d dịch vụ — chỉ gửi tới các dịch vụ có đúng giọng này.",
+					r.VoiceName, len(with), totalAll),
+				Pct: 1, ElapsedSec: 0})
+		} else {
+			emitEv(onEv, Event{Phase: "info", Label: r.VoiceName,
+				Message: fmt.Sprintf("Không dịch vụ nào khai báo giọng %q — mỗi dịch vụ sẽ dùng giọng gần đúng của nó.", r.VoiceName),
+				Pct:     1, ElapsedSec: 0})
+		}
 	}
 	total := len(reg)
 	started := time.Now()
@@ -146,20 +175,23 @@ func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv
 		}
 
 		tried++
-		label := fmt.Sprintf("%s (%d/%d)", d.Label, i+1, total)
+		// PATCH FIX55: thanh tiến trình KHÔNG còn hiển thị tên kỹ thuật
+		// HF/URL — chi tiết từng dịch vụ xem ở thẻ “Dịch vụ Online”.
 		emitEv(onEv, Event{Phase: "trying", ProviderID: d.ID, Label: d.Label,
-			Message: "Đang gửi tới " + label + "…", Pct: basePct + 2,
+			Message: "Đang gửi yêu cầu tới Server tổng hợp…", Pct: basePct + 2,
 			ElapsedSec: time.Since(started).Seconds()})
 
 		res, err := callProvider(ctx, hc, d, r, func(ev gradioEvent) {
 			// heartbeat/process_starts của gradio → nhích % để người dùng
 			// thấy app còn sống (chống cảm giác "đứng im").
 			if onEv != nil && (ev.name == "heartbeat" || ev.name == "process_starts" || ev.name == "process_generating") {
-				msg := "Đang chờ " + label + " tổng hợp…"
+				// PATCH FIX55: thông điệp gọn theo yêu cầu UI —
+				// "Đang chờ Server tổng hợp" thay cho tên kỹ thuật.
+				msg := "Đang chờ Server tổng hợp…"
 				if ev.name == "process_starts" {
-					msg = "Đang tổng hợp trên " + label + "…"
+					msg = "Server đã nhận — đang tổng hợp…"
 				} else if ev.name == "process_generating" {
-					msg = "Đang nhận kết quả từ " + label + "…"
+					msg = "Server đang trả kết quả…"
 				}
 				creep := basePct + 2 + minF(6, time.Since(started).Seconds()/30)
 				emitEv(onEv, Event{Phase: "waiting", ProviderID: d.ID, Label: d.Label,

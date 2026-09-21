@@ -1345,6 +1345,14 @@ input[type=range]::-webkit-slider-thumb:hover{ transform:scale(1.12); }
 }
 .cloud-select:focus { outline: none; border-color: var(--accent); }
 #btn-cloud-file { border: 1px solid var(--border); }
+/* PATCH FIX55: checkbox lọc 8 giọng ổn định (OD) trong hàng tuỳ chọn online */
+.od-filter {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-sub);
+  cursor: pointer; white-space: nowrap; user-select: none;
+}
+.od-filter:hover { color: var(--text); }
+.od-filter input { accent-color: var(--accent); margin: 0; }
 
 /* Ở chế độ online, "Nghe ngay" (streaming cục bộ) không còn ý nghĩa */
 body.mode-online .stream-live { display: none; }
@@ -1430,7 +1438,10 @@ body.mode-online .stream-live { display: none; }
                 </div>
                 <!-- PATCH FIX53: hàng tùy chọn riêng cho chế độ online -->
                 <div class="cloud-row" id="cloud-row" hidden>
-                    <select id="cloud-voice-select" class="cloud-select" title="Giọng mong muốn — dịch vụ không có giọng này sẽ dùng giọng mặc định của nó"></select>
+                    <select id="cloud-voice-select" class="cloud-select" title="Giọng mong muốn — FIX55: chuỗi online CHỈ ghé dịch vụ có đúng giọng này (không còn bị thay giọng ngầm). Chọn giọng có đuôi - OD để ổn định nhất"></select>
+                    <label class="od-filter" title="Chỉ hiện 8 giọng ổn định đã kiểm chứng: 6 giọng tin tức đủ 3 miền (Bắc/Trung/Nam) + 2 giọng kể chuyện (nữ/nam)">
+                        <input type="checkbox" id="cloud-od-only" /> Chỉ OD
+                    </label>
                     <button type="button" id="btn-cloud-file" class="tool-btn" title="Nạp file .txt / .srt / .md vào ô văn bản"><i data-ico="filetext"></i></button>
                 </div>
                 <div class="convert-wrap">

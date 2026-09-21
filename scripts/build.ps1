@@ -739,6 +739,43 @@ Step "Bien dich HCStudio.exe"
 
 Push-Location $RepoRoot
 try {
+    # ---------------- PATCH FIX55: icon ca nhan hoa (VKS) ----------------
+    # Neu assets\brand\vks.ico / vks.png ton tai (user da chep vao):
+    #   1. vks.png -> build\appicon.png   (icon ung dung Wails)
+    #   2. vks.ico -> build\windows\icon.ico (dung cho installer + du phong)
+    #   3. sinh lai rsrc_windows_amd64.syso bang go-winres (tu `go install`
+    #      neu chua co) - `go build` TU DONG nhung .syso vao exe, nen file
+    #      HCStudio.exe hien icon ca nhan tren Explorer + thanh title.
+    # Khong co vks.* -> giu nguyen .syso da ship trong repo (icon tam mac
+    # dinh cua du an, da nhung san). Cu 2 file vks.* do user quyet dinh.
+    $brandIco = Join-Path $RepoRoot "assets\brand\vks.ico"
+    $brandPng = Join-Path $RepoRoot "assets\brand\vks.png"
+    if (Test-Path $brandPng) {
+        Copy-Item $brandPng (Join-Path $RepoRoot "build\appicon.png") -Force
+        Write-Host "[FIX55] da dung assets\brand\vks.png lam build\appicon.png"
+    }
+    if (Test-Path $brandIco) {
+        Copy-Item $brandIco (Join-Path $RepoRoot "build\windows\icon.ico") -Force
+        Write-Host "[FIX55] da dung assets\brand\vks.ico lam build\windows\icon.ico"
+        $gopathStr = (& go env GOPATH).Trim()
+        $goWinres = Join-Path $gopathStr "bin\go-winres.exe"
+        if (-not (Test-Path $goWinres)) {
+            Write-Host "[FIX55] cai go-winres (lan dau)..."
+            & go install github.com/tc-hib/go-winres@latest
+        }
+        if (Test-Path $goWinres) {
+            & $goWinres simply --arch amd64 --icon $brandIco --product-name "HCStudio" --product-version "5.0.0.0" --file-version "5.0.0.0" --file-description "HCStudio" --copyright "Copyright 2026 HCStudio" --out rsrc
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[FIX55] da sinh lai rsrc_windows_amd64.syso tu vks.ico"
+            }
+            else {
+                Write-Host "[FIX55] CANH BAO: go-winres that bai (exit $LASTEXITCODE) - exe se dung .syso co san"
+            }
+        }
+        else {
+            Write-Host "[FIX55] CANH BAO: khong tai duoc go-winres - exe se dung .syso co san"
+        }
+    }
     if ($Full) {
         & go build -trimpath -tags ($wailsTags + ",vieneu") -ldflags "$ldflags" -o (Join-Path $DistDir $exeName) .
     }

@@ -270,6 +270,9 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	c.snap.Providers["x"] = &PState{Status: "quota", ExhaustedUntil: c.today(), CountToday: 3, Day: c.today()}
 	j := c.SnapshotJSON()
 	c2 := NewChain(j)
+	c2.nowFn = c.nowFn // PATCH FIX55: ghim cả đồng hồ của bản khôi phục —
+	// nếu không, chạy test sang ngày khác sẽ đụng bộ reset theo ngày
+	// (đúng hành vi production: hạn mức theo ngày phải reset) và test vỡ.
 	if !c2.exhausted("x") {
 		t.Fatalf("exhaustion should survive round-trip: %s", j)
 	}
@@ -324,5 +327,119 @@ func TestParseSSE(t *testing.T) {
 	})
 	if len(names) != 2 || names[0] != "heartbeat:null" || names[1] != "complete:[1,2]" {
 		t.Fatalf("parseSSE broken: %v", names)
+	}
+}
+
+// ─── PATCH FIX55: lọc chuỗi theo giọng + bất biến bộ 8 giọng OD ─────────
+
+// TestChainVoiceFilter: chọn giọng mà CHỈ 1 dịch vụ khai báo → chuỗi phải
+// bỏ qua hoàn toàn các dịch vụ khác (0 request) và ghé đúng dịch vụ đó.
+func TestChainVoiceFilter(t *testing.T) {
+	callsYes := &atomic.Int32{}
+	srvYes := fakeGradioFull(t, "ok", callsYes)
+	defer srvYes.Close()
+	callsNo := &atomic.Int32{}
+	srvNo := fakeGradioFull(t, "ok", callsNo)
+	defer srvNo.Close()
+
+	c := testChain()
+	c.reg = []Desc{
+		{ID: "no1", Label: "No1", Kind: "gradio", Base: srvNo.URL, API: "synthesize",
+			DataStyle: "template", DefaultVoice: "V"},
+		{ID: "yes", Label: "Yes", Kind: "gradio", Base: srvYes.URL, API: "synthesize",
+			DataStyle: "template", DefaultVoice: "V",
+			Voices: []Voice{{Name: "Ngọc Linh"}}},
+	}
+	var infos []string
+	res, err := c.Synthesize(context.Background(), newHTTP(),
+		Request{Text: "test", VoiceName: "Ngọc Linh"}, func(e Event) {
+			if e.Phase == "info" {
+				infos = append(infos, e.Message)
+			}
+		})
+	if err != nil || res.ProviderID != "yes" {
+		t.Fatalf("expected via 'yes', got provider=%s err=%v", res.ProviderID, err)
+	}
+	if callsYes.Load() != 1 || callsNo.Load() != 0 {
+		t.Fatalf("voice filter broken: yes=%d no=%d (phải là 1/0)", callsYes.Load(), callsNo.Load())
+	}
+	if len(infos) != 1 || !strings.Contains(infos[0], "1/2") {
+		t.Fatalf("thiếu event info lọc giọng: %v", infos)
+	}
+}
+
+// TestChainVoiceUnknownFallsBack: giọng lạ (không có trong catalog nào) →
+// giữ hành vi cũ: đi cả chuỗi theo thứ tự (dịch vụ đầu thành công là dừng).
+func TestChainVoiceUnknownFallsBack(t *testing.T) {
+	calls := &atomic.Int32{}
+	srv := fakeGradioFull(t, "ok", calls)
+	defer srv.Close()
+
+	c := testChain()
+	c.reg = []Desc{
+		{ID: "first", Label: "First", Kind: "gradio", Base: srv.URL, API: "synthesize",
+			DataStyle: "template", DefaultVoice: "V"},
+		{ID: "second", Label: "Second", Kind: "gradio", Base: srv.URL, API: "synthesize",
+			DataStyle: "template", DefaultVoice: "V",
+			Voices: []Voice{{Name: "Ngọc Linh"}}},
+	}
+	var infos []string
+	res, err := c.Synthesize(context.Background(), newHTTP(),
+		Request{Text: "test", VoiceName: "Giọng Lạ"}, func(e Event) {
+			if e.Phase == "info" {
+				infos = append(infos, e.Message)
+			}
+		})
+	if err != nil || res.ProviderID != "first" {
+		t.Fatalf("giọng lạ phải đi cả chuỗi (first thành công trước), got %s err=%v", res.ProviderID, err)
+	}
+	if len(infos) != 1 || !strings.Contains(infos[0], "Không dịch vụ nào khai báo") {
+		t.Fatalf("thiếu cảnh báo giọng lạ: %v", infos)
+	}
+}
+
+// TestODVoicesInvariant: đủ 8 giọng, không trùng, mỗi giọng phải tồn tại
+// trong catalog của ≥1 dịch vụ thật (nếu không UI sẽ ghim giọng "ma"),
+// đủ ma trận vùng (Bắc 3 · Trung 2 · Nam 3) và ≥2 giọng có trên dịch vụ CPU.
+func TestODVoicesInvariant(t *testing.T) {
+	ods := ODVoices()
+	if len(ods) != 8 {
+		t.Fatalf("bộ OD phải đúng 8 giọng, got %d", len(ods))
+	}
+	seen := map[string]bool{}
+	cntRegion := map[string]int{}
+	for _, od := range ods {
+		if seen[od.Name] {
+			t.Fatalf("trùng tên OD: %s", od.Name)
+		}
+		seen[od.Name] = true
+		cntRegion[od.Region]++
+	}
+	if cntRegion["Bắc"] != 3 || cntRegion["Trung"] != 2 || cntRegion["Nam"] != 3 {
+		t.Fatalf("sai ma trận vùng: %v", cntRegion)
+	}
+	reg := Registry()
+	for _, od := range ods {
+		n := 0
+		for _, d := range reg {
+			if d.HasVoice(od.Name) {
+				n++
+			}
+		}
+		if n == 0 {
+			t.Fatalf("giọng OD %q không nằm trên dịch vụ nào trong Registry", od.Name)
+		}
+	}
+	cpu := 0
+	for _, od := range ods {
+		for _, d := range reg {
+			if (d.ID == "hf-eagle0019" || d.ID == "hf-tuananh20015") && d.HasVoice(od.Name) {
+				cpu++
+				break
+			}
+		}
+	}
+	if cpu < 2 {
+		t.Fatalf("cần ≥2 giọng OD có trên dịch vụ CPU (eagle0019/Tuananh20015), got %d", cpu)
 	}
 }

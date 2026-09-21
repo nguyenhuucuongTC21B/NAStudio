@@ -75,6 +75,8 @@
       ListSessions: () => api.ListSessions(),
       // PATCH FIX53: chế độ sử dụng online (cầu nối chuyển tiếp)
       CloudProviders: () => api.CloudProviders ? api.CloudProviders() : Promise.resolve([]),
+      // PATCH FIX55: 8 giọng ổn định (OD) để ghim đầu dropdown online
+      CloudODVoices: () => api.CloudODVoices ? api.CloudODVoices() : Promise.resolve([]),
       CloudSynthesize: (text, voice) => api.CloudSynthesize ? api.CloudSynthesize(text, voice) : Promise.resolve(""),
       CloudPickTextFile: () => api.CloudPickTextFile ? api.CloudPickTextFile() : Promise.resolve(""),
       WindowAction: (cmd) => api.WindowAction(cmd),
@@ -273,15 +275,28 @@
             note: "CPU thường — không tốn hạn mức GPU.", voices: ["Hoài My (Nữ)", "Nam Minh (Nam)"].map(n => ({ name: n })) },
         ];
       },
+      // PATCH FIX55: mock bộ 8 giọng OD (đồng bộ internal/cloud/od.go)
+      async CloudODVoices() {
+        return [
+          { name: "Mai Anh", gender: "Nữ", region: "Bắc", style: "Tin tức", note: "Nữ miền Bắc · tin tức — 7/13 dịch vụ" },
+          { name: "Minh Đức", gender: "Nam", region: "Bắc", style: "Tin tức", note: "Nam miền Bắc · tin tức — 5/13 dịch vụ" },
+          { name: "Ngọc Trân", gender: "Nữ", region: "Trung", style: "Tự nhiên", note: "Nữ miền Trung — giọng Trung duy nhất" },
+          { name: "Quang Sơn", gender: "Nam", region: "Trung", style: "Tự nhiên", note: "Nam miền Trung — giọng Trung duy nhất" },
+          { name: "Thùy Dung", gender: "Nữ", region: "Nam", style: "Tin tức", note: "Nữ miền Nam · tin tức — 7/13 dịch vụ" },
+          { name: "Minh Triết", gender: "Nam", region: "Nam", style: "Tin tức", note: "Nam miền Nam · tin tức" },
+          { name: "Thái Sơn", gender: "Nam", region: "Nam", style: "Kể chuyện", note: "Nam kể chuyện — có trên cả 2 dịch vụ CPU" },
+          { name: "Ngọc Linh", gender: "Nữ", region: "Bắc", style: "Kể chuyện", note: "Nữ kể chuyện — có trên cả 2 dịch vụ CPU" },
+        ];
+      },
       async CloudSynthesize(text, voice) {
         const id = `cloud-${++jobSeq}`;
         const steps = [
           ["splitting", 1, "Chuẩn bị gửi lên dịch vụ online…"],
-          ["synthesizing", 6, "Đang gửi tới vieneu.io (chính thức) (1/3)…"],
+          ["synthesizing", 6, "Đang gửi yêu cầu tới Server tổng hợp…"],
           ["synthesizing", 8, "vieneu.io hết lượt — tự động chuyển dịch vụ kế tiếp."],
-          ["synthesizing", 12, "Đang gửi tới HF · eagle0019/VieNeu-TTS-v3-Turbo (3/3)…"],
-          ["synthesizing", 40, "Đang tổng hợp trên HF · eagle0019…"],
-          ["synthesizing", 75, "Đang nhận kết quả từ HF · eagle0019…"],
+          ["synthesizing", 12, "Đang gửi yêu cầu tới Server tổng hợp…"],
+          ["synthesizing", 40, "Server đã nhận — đang tổng hợp…"],
+          ["synthesizing", 75, "Server đang trả kết quả…"],
           ["dsp", 96, "Giải mã audio nhận về…"],
         ];
         let i = 0;

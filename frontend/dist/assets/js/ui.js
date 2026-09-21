@@ -26,7 +26,7 @@
     "queue-list", "playlist-list", "btn-queue-add", "btn-queue-clear", "queue-count-chip",
     // PATCH FIX53: chế độ sử dụng online (cầu nối chuyển tiếp)
     "mode-seg", "btn-mode-offline", "btn-mode-online", "cloud-row",
-    "cloud-voice-select", "btn-cloud-file", "cloud-hint",
+    "cloud-voice-select", "btn-cloud-file", "cloud-hint", "cloud-od-only",
     "cloud-panel-list", "btn-cloud-refresh", "cloud-card",
   ].forEach((id) => { els[id] = document.getElementById(id); });
 
@@ -670,29 +670,68 @@
   function rebuildCloudVoiceOptions() {
     if (!els["cloud-voice-select"]) return;
     const sel = els["cloud-voice-select"];
+    // PATCH FIX55: nạp bộ 8 giọng ổn định (OD) từ backend (1 lần)
+    if (bridge.CloudODVoices && !state.cloudOD.length) {
+      Promise.resolve(bridge.CloudODVoices())
+        .then((lst) => {
+          state.cloudOD = Array.isArray(lst) ? lst : [];
+          rebuildCloudVoiceOptions();
+        })
+        .catch(() => {});
+    }
+    const odMeta = new Map((state.cloudOD || []).map((v) => [v.name, v]));
+    const odOnly = !!state.cloudODOnly;
     const seen = new Set();
-    const opts = [];
+    const cov = {}; // name → số dịch vụ khai báo giọng này
+    const plain = [];
     (state.cloudProviders || []).forEach((p) => {
       (p.voices || []).forEach((v) => {
         const name = v.name || v.Name;
-        if (!name || seen.has(name)) return;
-        seen.add(name);
-        opts.push(name);
+        if (!name) return;
+        cov[name] = (cov[name] || 0) + 1;
+        if (!seen.has(name)) {
+          seen.add(name);
+          plain.push(name);
+        }
       });
     });
-    state.cloudVoiceOptions = opts;
+    // giọng OD có thật trong catalog → ghim đầu danh sách theo bộ OD
+    const odList = (state.cloudOD || [])
+      .map((v) => v.name)
+      .filter((n) => seen.has(n));
+    const rest = plain.filter((n) => !odMeta.has(n));
+    const list = odOnly ? odList : odList.concat(rest);
+    state.cloudVoiceOptions = list;
+    const total = (state.cloudProviders || []).length;
     sel.innerHTML = "";
     const def = document.createElement("option");
     def.value = "";
     def.textContent = "Giọng mặc định từng dịch vụ";
     sel.appendChild(def);
-    opts.forEach((name) => {
+    list.forEach((name) => {
       const o = document.createElement("option");
-      o.value = name;
-      o.textContent = name;
+      o.value = name; // GIÁ TRỊ luôn là tên gốc gửi cho dịch vụ
+      const od = odMeta.get(name);
+      if (od) {
+        o.textContent = `${name} - OD · ${od.gender} ${od.region} · ${od.style}`;
+        o.title = `${od.note || "Giọng ổn định đã kiểm chứng"}`
+          + (total ? ` · có trên ${cov[name] || 0}/${total} dịch vụ` : "");
+      } else {
+        o.textContent = name;
+        if (total) o.title = `Có trên ${cov[name] || 0}/${total} dịch vụ`;
+      }
       sel.appendChild(o);
     });
-    sel.value = opts.includes(state.cloudVoice) ? state.cloudVoice : "";
+    // giữ lựa chọn cũ nếu vẫn nằm trong danh sách đang lọc
+    if (list.includes(state.cloudVoice)) {
+      sel.value = state.cloudVoice;
+    } else {
+      sel.value = "";
+      if (state.cloudVoice) {
+        actions.patch({ cloudVoice: "" });
+        actions.saveDebounced();
+      }
+    }
   }
 
   async function refreshCloudProviders() {
@@ -721,6 +760,12 @@
       els["cloud-voice-select"].addEventListener("change", () => {
         actions.patch({ cloudVoice: els["cloud-voice-select"].value });
         actions.saveDebounced();
+      });
+    }
+    if (els["cloud-od-only"]) {
+      els["cloud-od-only"].addEventListener("change", () => {
+        actions.patch({ cloudODOnly: els["cloud-od-only"].checked });
+        rebuildCloudVoiceOptions();
       });
     }
     if (els["btn-cloud-file"]) {

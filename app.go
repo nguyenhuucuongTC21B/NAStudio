@@ -661,6 +661,13 @@ func (a *App) CloudProviders() []CloudProviderInfo {
 	return out
 }
 
+// CloudODVoices trả 8 giọng ổn định (OD) — PATCH FIX55. UI ghim bộ này
+// lên đầu dropdown giọng online với hậu tố "- OD" để người dùng dễ phân
+// biệt và chọn nhanh giọng đã kiểm chứng (đúng miền, đúng style).
+func (a *App) CloudODVoices() []cloud.ODVoice {
+	return cloud.ODVoices()
+}
+
 // CloudSynthesize bắt đầu job tổng hợp ONLINE async — trả jobID ngay.
 // Văn bản được gửi lần lượt qua chuỗi dịch vụ (vieneu.io → HF Space…),
 // hết lượt/ lỗi thì tự chuyển tiếp. Kết quả về trở thành session bình
