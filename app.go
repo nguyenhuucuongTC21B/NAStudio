@@ -644,7 +644,7 @@ type CloudProviderInfo struct {
 	Voices       []cloud.Voice `json:"voices"`
 }
 
-// CloudProviders trả toàn bộ dịch vụ đúng thứ tự chuỗi (13 từ FIX54) + trạng thái hiện tại
+// CloudProviders trả toàn bộ dịch vụ đúng thứ tự chuỗi (14 — FIX59: nguyenduc1222 dời cuối, audio rè bị lọc tự động) + trạng thái hiện tại
 // (đã nhớ từ snapshot settings) để UI vẽ bảng trạng thái.
 func (a *App) CloudProviders() []CloudProviderInfo {
 	// PATCH FIX57: nút "Làm mới" = xóa trạng thái tạm (cooldown/cạn hạn mức
@@ -742,24 +742,32 @@ func (a *App) runCloudSynthesis(ctx context.Context, jobID, text, voiceName stri
 		return
 	}
 
-	// decode audio nhận về → PCM mono (cả vieneu.io lẫn các Space đều trả
-	// WAV; ReadWav của FIX46 đã là parser đầy đủ 8/16/24/32-bit + stereo).
-	a.pushJob(jobID, "dsp", "Giải mã audio nhận về…", 96)
-	tmpWav := filepath.Join(os.TempDir(), "hcstudio-"+jobID+".tmp.wav")
-	if werr := os.WriteFile(tmpWav, res.Audio, 0o644); werr != nil {
-		diagf("[error] cloud %s: ghi file tạm lỗi: %v", jobID, werr)
-		a.pushJob(jobID, "error", "Không ghi được file tạm audio: "+werr.Error(), 0)
-		return
-	}
-	// PATCH FIX56: ReadAudioFile nhận biết WAV + MP3 (DevTam05 trả MP3;
-	// trước đây chỉ đọc WAV nên job chết ở bước giải mã dù tổng hợp OK).
-	samples, sr, _, rerr := dsp.ReadAudioFile(tmpWav)
-	_ = os.Remove(tmpWav)
-	if rerr != nil || len(samples) == 0 {
-		diagf("[error] cloud %s: decode audio lỗi (%v) · mime=%s · %d bytes", jobID, rerr, res.MIME, len(res.Audio))
-		a.pushJob(jobID, "error", "Audio nhận về không đọc được (mime: "+res.MIME+")", 0)
-		a.toast("error", "Chế độ online thất bại", "Dịch vụ trả audio không đọc được — đã dừng để bảo toàn dữ liệu.")
-		return
+	// PATCH FIX59: chuỗi đã decode + lọc chất lượng audio trước khi coi
+	// là thành công (res.Samples) — audio rè/rác đã bị chặn ở tầng chuỗi
+	// và tự nhảy dịch vụ. Nhánh decode file tạm giữ lại làm dự phòng
+	// (kết quả đến từ đường khác hoặc phiên cũ).
+	var samples []float32
+	var sr int
+	if len(res.Samples) > 0 && res.SR > 0 {
+		samples, sr = res.Samples, res.SR
+	} else {
+		tmpWav := filepath.Join(os.TempDir(), "hcstudio-"+jobID+".tmp.wav")
+		if werr := os.WriteFile(tmpWav, res.Audio, 0o644); werr != nil {
+			diagf("[error] cloud %s: ghi file tạm lỗi: %v", jobID, werr)
+			a.pushJob(jobID, "error", "Không ghi được file tạm audio: "+werr.Error(), 0)
+			return
+		}
+		// PATCH FIX56: ReadAudioFile nhận biết WAV + MP3 (DevTam05 trả MP3;
+		// trước đây chỉ đọc WAV nên job chết ở bước giải mã dù tổng hợp OK).
+		var rerr error
+		samples, sr, _, rerr = dsp.ReadAudioFile(tmpWav)
+		_ = os.Remove(tmpWav)
+		if rerr != nil || len(samples) == 0 {
+			diagf("[error] cloud %s: decode audio lỗi (%v) · mime=%s · %d bytes", jobID, rerr, res.MIME, len(res.Audio))
+			a.pushJob(jobID, "error", "Audio nhận về không đọc được (mime: "+res.MIME+")", 0)
+			a.toast("error", "Chế độ online thất bại", "Dịch vụ trả audio không đọc được — đã dừng để bảo toàn dữ liệu.")
+			return
+		}
 	}
 
 	sess := &Session{

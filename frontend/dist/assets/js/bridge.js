@@ -261,23 +261,32 @@
       // PATCH FIX56: thứ tự mới theo probe thật — DevTam05/hongqminh nâng
       // lên đầu; Smrfhdl gỡ (cần đăng nhập HF); vieneu.io host mới.
       // PATCH FIX57: thêm hf-nguyenduc1222 (dự phòng họ hongqminh).
+      // PATCH FIX59: hf-nguyenduc1222 dời XUỐNG CUỐI chuỗi — probe60 11:02
+      // 2026-09-21 bắt nó trả audio rè vô nghĩa (nhiễu trắng); bộ lọc chất
+      // lượng chuỗi giờ chặn tự động, mock thể hiện đúng note mới.
       async CloudProviders() {
         return [
+          // PATCH FIX58: edge-tts (Microsoft Edge TTS trực tiếp) đứng ĐẦU chuỗi.
+          { id: "edge-tts", label: "Microsoft Edge TTS (miễn phí)", kind: "edge", status: "unknown", countToday: 0, defaultVoice: "Hoài My (Nữ)",
+            note: "Xương sống mới FIX58 — giọng neural Hoài My/Nam Minh của Microsoft Edge gọi trực tiếp: miễn phí KHÔNG giới hạn, không tài khoản, không phụ thuộc space cộng đồng.", voices: ["Hoài My (Nữ)", "Nam Minh (Nam)"].map(n => ({ name: n })) },
           { id: "vieneu-io", label: "vieneu.io (chính thức)", kind: "vieneuio", status: "unknown", countToday: 0, defaultVoice: "Adam Tốp Tốp",
             note: "API demo chính thức (host mới api.vieneu.io) — nhanh; giới hạn 50 lượt/~7 giờ; tập giọng demo nhận thay đổi theo thời điểm.", voices: ["Adam Tốp Tốp", "Duyên Hà My", "Đăng Quân", "Bình Bon", "My Méo", "Mai Anh", "Minh Đức", "Ngọc Linh", "Thái Sơn", "Thùy Dung", "Minh Triết", "Quang Sơn", "Ngọc Trân", "Mạnh Dũng"].map(n => ({ name: n })) },
           { id: "hf-devtam05", label: "HF · DevTam05/vieneu-tts", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Nam Minh (Nam)",
             note: "CPU thường — dịch vụ ổn định nhất trong probe 2026-09-21.", voices: ["Hoài My (Nữ)", "Nam Minh (Nam)"].map(n => ({ name: n })) },
           { id: "hf-hongqminh", label: "HF · hongqminh/VieNeu-TTS", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Tuyên (nam miền Bắc)",
             note: "CPU thường — chập chờn trong probe 2026-09-21.", voices: ["Tuyên (nam miền Bắc)", "Vĩnh (nam miền Nam)", "Bình (nam miền Bắc)", "Đoan (nữ miền Nam)", "Ngọc (nữ miền Bắc)", "Ly (nữ miền Bắc)"].map(n => ({ name: n })) },
-          { id: "hf-nguyenduc1222", label: "HF · nguyenduc1222/VieNeu-TTS", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Tuyên (nam miền Bắc)",
-            note: "CPU thường — cùng họ hongqminh, 9 giọng; probe 2026-09-21: complete 1,6s.", voices: ["Tuyên (nam miền Bắc)", "Vĩnh (nam miền Nam)", "Bình (nam miền Bắc)", "Nguyên (nam miền Nam)", "Sơn (nam miền Nam)", "Đoan (nữ miền Nam)", "Ngọc (nữ miền Bắc)", "Ly (nữ miền Bắc)", "Dung (nữ miền Nam)"].map(n => ({ name: n })) },
+          { id: "hf-pnnbao-ump", label: "HF · pnnbao-ump/VieNeu-TTS-v3-Turbo", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Minh Quân Pro",
+            note: "Space của tác giả mô hình — đang lỗi ứng dụng, lỗi trả tức thì.", voices: ["Adam bựa", "Trúc Ly", "Mai Anh", "Quang Sơn", "Ngọc Trân"].map(n => ({ name: n })) },
           { id: "arena-thomcles", label: "HF · Thomcles/yodalingua-tts-arena", kind: "arena", status: "skip", countToday: 0,
             skipReason: "Chỉ phục vụ bỏ phiếu mù — không có API tạo giọng.", voices: [] },
           { id: "hf-eagle0019", label: "HF · eagle0019/VieNeu-TTS-v3-Turbo", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Ngọc Linh",
-            note: "Đang lỗi ứng dụng (probe 2026-09-21) — lỗi trả tức thì.", voices: ["Ngọc Lan", "Gia Bảo", "Thái Sơn", "Trúc Ly", "Ngọc Linh"].map(n => ({ name: n })) },
+            note: "CPU thường — probe60 11:02: Thái Sơn + Ngọc Linh OK; chập chờn theo cơn trong ngày.", voices: ["Ngọc Lan", "Gia Bảo", "Thái Sơn", "Trúc Ly", "Ngọc Linh"].map(n => ({ name: n })) },
           // PATCH FIX54: mock thêm dịch vụ CPU (xương sống ổn định)
           { id: "hf-tuananh20015", label: "HF · Tuananh20015/VieNeu-TTS-v3-Turbo", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Ngọc Lan",
-            note: "CPU thường — đang lỗi ứng dụng (probe 2026-09-21).", voices: ["Ngọc Lan", "Gia Bảo", "Thái Sơn", "Đức Trí", "Mỹ Duyên", "Trúc Ly", "Xuân Vĩnh", "Trọng Hữu", "Bình An", "Ngọc Linh"].map(n => ({ name: n })) },
+            note: "CPU thường — probe60 11:02: Thái Sơn + Ngọc Lan OK 3,1-3,5s.", voices: ["Ngọc Lan", "Gia Bảo", "Thái Sơn", "Đức Trí", "Mỹ Duyên", "Trúc Ly", "Xuân Vĩnh", "Trọng Hữu", "Bình An", "Ngọc Linh"].map(n => ({ name: n })) },
+          // PATCH FIX59: cuối chuỗi — đang trả audio rè, bị bộ lọc chặn tự động.
+          { id: "hf-nguyenduc1222", label: "HF · nguyenduc1222/VieNeu-TTS", kind: "gradio", status: "unknown", countToday: 0, defaultVoice: "Tuyên (nam miền Bắc)",
+            note: "ĐANG TRẢ AUDIO RÈ (probe 11:02 2026-09-21: nhiễu trắng vô nghĩa) — bị bộ lọc chất lượng chặn tự động; đặt cuối chuỗi chờ chủ space khắc phục.", voices: ["Tuyên (nam miền Bắc)", "Vĩnh (nam miền Nam)", "Bình (nam miền Bắc)", "Nguyên (nam miền Nam)", "Sơn (nam miền Nam)", "Đoan (nữ miền Nam)", "Ngọc (nữ miền Bắc)", "Ly (nữ miền Bắc)", "Dung (nữ miền Nam)"].map(n => ({ name: n })) },
         ];
       },
       // PATCH FIX55: mock bộ 8 giọng OD (đồng bộ internal/cloud/od.go)

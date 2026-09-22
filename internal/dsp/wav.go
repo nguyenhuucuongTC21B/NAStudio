@@ -64,6 +64,12 @@ func ReadWav(path string) ([]float32, int, int, error) {
 	if err != nil {
 		return nil, 0, 0, err
 	}
+	return readWavBytes(raw)
+}
+
+// readWavBytes (PATCH FIX59) — parser WAV trên bộ nhớ, dùng chung cho
+// ReadWav(file) và ReadAudioBytes(buffer của chuỗi online).
+func readWavBytes(raw []byte) ([]float32, int, int, error) {
 	if len(raw) < 44 || string(raw[0:4]) != "RIFF" || string(raw[8:12]) != "WAVE" {
 		return nil, 0, 0, fmt.Errorf("file không phải WAV hợp lệ")
 	}

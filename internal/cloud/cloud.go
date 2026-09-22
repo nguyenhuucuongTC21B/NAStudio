@@ -94,14 +94,16 @@ type Request struct {
 
 // Result kết quả tổng hợp online thành công.
 type Result struct {
-	Audio         []byte  `json:"-"`
-	MIME          string  `json:"mime"`
-	ProviderID    string  `json:"providerId"`
-	ProviderLabel string  `json:"providerLabel"`
-	VoiceUsed     string  `json:"voiceUsed"`
-	Info          string  `json:"info"`  // thống kê đi kèm (thời gian sinh, RTF…)
-	Tried         int     `json:"tried"` // số dịch vụ đã thử
-	DurationSec   float64 `json:"-"`     // người gọi điền sau khi decode WAV
+	Audio         []byte    `json:"-"`
+	Samples       []float32 `json:"-"` // PATCH FIX59: PCM đã decode + qua lọc chất lượng (từ chuỗi)
+	SR            int       `json:"-"` // PATCH FIX59: sample rate đi cùng Samples
+	MIME          string    `json:"mime"`
+	ProviderID    string    `json:"providerId"`
+	ProviderLabel string    `json:"providerLabel"`
+	VoiceUsed     string    `json:"voiceUsed"`
+	Info          string    `json:"info"`  // thống kê đi kèm (thời gian sinh, RTF…)
+	Tried         int       `json:"tried"` // số dịch vụ đã thử
+	DurationSec   float64   `json:"-"`     // người gọi điền sau khi decode WAV
 }
 
 // Event tiến trình phát lên UI trong lúc chạy chuỗi cầu nối.
@@ -116,7 +118,15 @@ type Event struct {
 
 // Registry trả danh sách dịch vụ của chuỗi cầu nối.
 //
-// PATCH FIX56 — SẮP LẠI THỨ TỰ THEO KẾT QUẢ PROBE THẬT 2026-09-21:
+// PATCH FIX58 — EDGE TTS TRỰC TIẾP LÊN ĐẦU CHUỖI. Nghiên cứu 10 dịch vụ
+// ngoài (probe thật scripts59/ 2026-09-21: ElevenLabs, MiniMax, TTSMaker,
+// Ondoku, Speechify, Vbee, EverAI, Luvvoice, Narakeet, Canva) kết luận
+// các trang "miễn phí" đều chốt chống gọi tự động (GeeTest / Turnstile /
+// bắt đăng nhập) nhưng phát hiện Luvvoice chỉ là lớp vỏ cho giọng Edge
+// neural — gọi thẳng được, không cần trung gian:
+//  0. edge-tts — miễn phí KHÔNG giới hạn, không tài khoản, 2 giọng Việt
+//     neural (Hoài My/Nam Minh), ~1–3s, không phụ thuộc space cộng đồng
+//     ⇒ xương sống mới đứng đầu chuỗi.
 //  1. vieneu.io (api.vieneu.io) — nhanh (~2s), catalog 1204 giọng, nhưng
 //     demo giới hạn 50 lượt/~7h/IP và tập giọng nhận được xoay vòng.
 //  2. DevTam05 — dịch vụ DUY NHẤT còn chạy ổn định suốt đợt probe.
@@ -126,8 +136,27 @@ type Event struct {
 //     nên không gây treo); giữ nguyên vị trí tương đối để tự phục hồi
 //     khi chủ space sửa. Arena Thomcles vẫn được liệt kê nhưng tự bỏ
 //     qua như FIX53. Smrfhdl bị GỎ (giờ yêu cầu đăng nhập HF).
+//
+// PATCH FIX59 — BỘ LỌC CHẤT LƯỢNG + LƯỢT THỬ LẠI TỰ ĐỘNG. Báo lỗi user
+// 2026-09-21: "tất cả giọng OD không dùng được + một số giọng rè rè vô
+// nghĩa". Probe60 (11:02) tìm ra thủ phạm rè: hf-nguyenduc1222 trả WAV
+// hợp lệ nhưng nội dung NHIỄU TRẮNG (model hỏng trên server) — từ FIX59
+// mọi audio của chuỗi được decode + kiểm ngay tại chuỗi (dsp.LooksLikeNoise),
+// audio rè/rác = THẤT BẠI của dịch vụ đó, tự nhảy dịch vụ kế. Nguyên nhân
+// "OD không dùng được": vieneu xoay tập giọng + 6 space template ZeroGPU
+// lỗi "error:null" CHẬP CHỜN THEO TỪNG REQUEST — chuỗi giờ tự THỬ LẠI 1
+// lượt các server vừa lỗi thoáng qua trước khi trả lỗi. hf-nguyenduc1222
+// dời xuống CUỐI chuỗi (note thành thật).
 func Registry() []Desc {
 	return []Desc{
+		{
+			// PATCH FIX58: xương sống mới — Microsoft Edge TTS trực tiếp.
+			ID: "edge-tts", Label: "Microsoft Edge TTS (miễn phí)", Kind: "edge",
+			Base:         "wss://speech.platform.bing.com",
+			DefaultVoice: edgeDefaultVoiceName,
+			Voices:       voicesOfNames([]string{"Hoài My (Nữ)", "Nam Minh (Nam)"}),
+			Note:         "Xương sống mới FIX58 — giọng neural Hoài My/Nam Minh của Microsoft Edge gọi trực tiếp: miễn phí KHÔNG giới hạn, không tài khoản, không phụ thuộc space cộng đồng; ~1–3s mỗi đoạn, văn bản dài tự chia đoạn rồi ghép audio.",
+		},
 		{
 			ID: "vieneu-io", Label: "vieneu.io (chính thức)", Kind: "vieneuio",
 			Base: "https://api.vieneu.io", API: "/api/tts/demo",
@@ -148,13 +177,11 @@ func Registry() []Desc {
 			Note: "CPU thường — chập chờn trong probe 2026-09-21 (1 lần OK, phần còn lại lỗi tức thì).",
 		},
 		{
-			// PATCH FIX57: dự phòng cùng họ hongqminh — probe 05:04 complete 1,6s.
-			ID: "hf-nguyenduc1222", Label: "HF · nguyenduc1222/VieNeu-TTS", Kind: "gradio",
-			Base: "https://nguyenduc1222-vieneu-tts.hf.space", API: "synthesize_speech",
-			DataStyle: "speech5", DefaultVoice: "Tuyên (nam miền Bắc)", Voices: voicesOf("voicesNguyenduc1222"),
-			Note: "CPU thường — cùng họ hongqminh, 9 giọng (thêm Nguyên/Sơn/Dung miền Nam); probe 2026-09-21: complete 1,6s.",
-		},
-		{
+			// PATCH FIX59: ô trống do dời hf-nguyenduc1222 xuống CUỐI
+			// chuỗi — space đang trả audio rè vô nghĩa (bằng chứng
+			// probe60), đặt cuối để không tốn thời gian của dịch vụ
+			// khác; bộ lọc chất lượng sẽ chặn tự động khi nó hồi
+			// phục mà vẫn hỏng. Vị trí này về FIX60 nếu không cần.
 			ID: "hf-pnnbao-ump", Label: "HF · pnnbao-ump/VieNeu-TTS-v3-Turbo", Kind: "gradio",
 			Base: "https://pnnbao-ump-vieneu-tts-v3-turbo.hf.space", API: "synthesize",
 			DataStyle: "template", DefaultVoice: "Minh Quân Pro", Voices: voicesOf("voicesPnnbaoUmp"),
@@ -176,7 +203,7 @@ func Registry() []Desc {
 			ID: "hf-eagle0019", Label: "HF · eagle0019/VieNeu-TTS-v3-Turbo", Kind: "gradio",
 			Base: "https://eagle0019-vieneu-tts-v3-turbo.hf.space", API: "synthesize",
 			DataStyle: "template", DefaultVoice: "Ngọc Linh", Voices: voicesOf("voicesEagle0019"),
-			Note: "Kiểm chứng tốt ngày 2026-09-20, đang lỗi ứng dụng ngày 2026-09-21 — lỗi trả tức thì.",
+			Note: "CPU thường — probe60 11:02 2026-09-21: Thái Sơn + Ngọc Linh OK (3,4-3,6s, chậm ~25s/lần gọi); chập chờn theo cơn trong ngày.",
 		},
 		{
 			ID: "hf-xtieps", Label: "HF · xtieps/VieNeu-TTS-v3-Turbo", Kind: "gradio",
@@ -206,7 +233,22 @@ func Registry() []Desc {
 			ID: "hf-tuananh20015", Label: "HF · Tuananh20015/VieNeu-TTS-v3-Turbo", Kind: "gradio",
 			Base: "https://tuananh20015-vieneu-tts-v3-turbo.hf.space", API: "synthesize",
 			DataStyle: "template", DefaultVoice: "Ngọc Lan", Voices: voicesOf("voicesTuananh20015"),
-			Note: "CPU thường — kiểm chứng tốt 2026-09-20, đang lỗi ứng dụng 2026-09-21; space còn có chế độ hội thoại nhiều giọng.",
+			Note: "CPU thường — kiểm chứng tốt 2026-09-20; probe60 11:02 2026-09-21: Thái Sơn + Ngọc Lan OK 3,1-3,5s; còn chế độ hội thoại nhiều giọng.",
+		},
+		{
+			// PATCH FIX59: DỜI XUỐNG CUỐI CHUỖI + NOTE THÀNH THỰC —
+			// probe60 (11:02 2026-09-21) bắt chính xác space này trả
+			// WAV hợp lệ nhưng nội dung NHIỄU TRẮNG vô nghĩa cho MỌI
+			// giọng (mẫu phân phối đều [-0.5,0.5], rms_cv 0.01, zcr
+			// 0.50, cùng độ dài 144044 byte khác giọng) — model hỏng
+			// trên server, chính là nguồn "giọng rè rè vô nghĩa" user
+			// nghe. Từ FIX59 audio của nó bị bộ lọc chất lượng chặn
+			// tự động; giữ cuối chuỗi chờ chủ space sửa là dùng lại
+			// được ngay, không cần cập nhật app.
+			ID: "hf-nguyenduc1222", Label: "HF · nguyenduc1222/VieNeu-TTS", Kind: "gradio",
+			Base: "https://nguyenduc1222-vieneu-tts.hf.space", API: "synthesize_speech",
+			DataStyle: "speech5", DefaultVoice: "Tuyên (nam miền Bắc)", Voices: voicesOf("voicesNguyenduc1222"),
+			Note: "CPU thường — ĐANG TRẢ AUDIO RÈ (probe 11:02 2026-09-21: nhiễu trắng vô nghĩa) nên bị bộ lọc chất lượng chặn tự động; đặt cuối chuỗi chờ chủ space khắc phục.",
 		},
 	}
 }
@@ -261,8 +303,16 @@ const (
 	AttemptTimeout = 3 * time.Minute
 	// ErrCooldown khoảng thời gian 1 dịch vụ vừa lỗi được tạm tránh.
 	ErrCooldown = 5 * time.Minute
+	// maxRetryPass — PATCH FIX59: trần số dịch vụ được thử lại ở lượt 2
+	// (giữ thứ tự ưu tiên đầu chuỗi; bề trên thời gian chờ có bến).
+	maxRetryPass = 8
 )
 
 // WakeRetryDelay chờ space "dậy" khi trả 502/503 (cold start HF).
 // var (không const) để test rút ngắn.
 var WakeRetryDelay = 25 * time.Second
+
+// RetryPassDelay — PATCH FIX59: trễ giữa các lần gọi ở lượt thử lại tự
+// động (không dồn dập server; space ZeroGPU chập chờn theo từng request
+// nên 1,2s đủ để đổi slot). var để test rút ngắn.
+var RetryPassDelay = 1200 * time.Millisecond

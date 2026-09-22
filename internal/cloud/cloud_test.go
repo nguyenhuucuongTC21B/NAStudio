@@ -3,8 +3,11 @@ package cloud
 import (
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +15,63 @@ import (
 	"testing"
 	"time"
 )
+
+// ---------- PATCH FIX59: WAV giả cho test (giọng mô phỏng / nhiễu trắng) ----------
+
+// wavBytes đóng gói PCM int16 mono thành WAV 16-bit chuẩn.
+func wavBytes(pcm []int16, sr int) []byte {
+	b := make([]byte, 44+len(pcm)*2)
+	copy(b, "RIFF")
+	binary.LittleEndian.PutUint32(b[4:8], uint32(36+len(pcm)*2))
+	copy(b[8:12], "WAVE")
+	copy(b[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(b[16:20], 16)
+	binary.LittleEndian.PutUint16(b[20:22], 1) // PCM
+	binary.LittleEndian.PutUint16(b[22:24], 1) // mono
+	binary.LittleEndian.PutUint32(b[24:28], uint32(sr))
+	binary.LittleEndian.PutUint32(b[28:32], uint32(sr*2))
+	binary.LittleEndian.PutUint16(b[32:34], 2)
+	binary.LittleEndian.PutUint16(b[34:36], 16)
+	copy(b[36:40], "data")
+	binary.LittleEndian.PutUint32(b[40:44], uint32(len(pcm)*2))
+	for i, v := range pcm {
+		binary.LittleEndian.PutUint16(b[44+i*2:], uint16(v))
+	}
+	return b
+}
+
+// fakeSpeechWav — 1.6s giọng mô phỏng: 4 cụm âm tiết 180ms cách nhau 70ms
+// lặng, sóng hài 180Hz + 900Hz. Đảm bảo QUA bộ lọc LooksLikeNoise (bộ lọc
+// trong chuỗi FIX59 coi đây là audio hợp lệ).
+func fakeSpeechWav() []byte {
+	const sr = 24000
+	n := sr * 16 / 10
+	pcm := make([]int16, n)
+	for i := 0; i < n; i++ {
+		t := float64(i) / sr
+		amp := 0.0
+		if int(t*1000)%250 < 180 {
+			amp = 0.6
+		}
+		v := amp * (0.7*math.Sin(2*math.Pi*180*t) + 0.3*math.Sin(2*math.Pi*900*t))
+		pcm[i] = int16(v * 32767)
+	}
+	return wavBytes(pcm, sr)
+}
+
+// fakeNoiseWav — 1.5s nhiễu trắng đều [-0.5, 0.5], giống HỆT output probe60
+// bắt được từ nguyenduc1222 (thủ phạm "giọng rè rè vô nghĩa"). Bộ lọc
+// LooksLikeNoise phải bắt được.
+func fakeNoiseWav() []byte {
+	const sr = 24000
+	n := sr * 3 / 2
+	rng := rand.New(rand.NewSource(59))
+	pcm := make([]int16, n)
+	for i := range pcm {
+		pcm[i] = int16((rng.Float64()*2 - 1) * 16384)
+	}
+	return wavBytes(pcm, sr)
+}
 
 // ---------- fake vieneu.io ----------
 
@@ -26,8 +86,10 @@ func fakeVieneu(t *testing.T, mode string) *httptest.Server {
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		switch mode {
 		case "ok":
+			// PATCH FIX59: fake giờ trả WAV giọng mô phỏng HỢP LỆ —
+			// chuỗi kiểm chất lượng thật nên byte rác sẽ bị coi là thất bại.
 			_ = json.NewEncoder(w).Encode(map[string]string{
-				"audioBase64": base64.StdEncoding.EncodeToString([]byte("RIFF-fake-audio")),
+				"audioBase64": base64.StdEncoding.EncodeToString(fakeSpeechWav()),
 				"mimeType":    "audio/wav",
 			})
 		case "quota":
@@ -80,7 +142,32 @@ func fakeGradioFull(t *testing.T, mode string, calls *atomic.Int32) *httptest.Se
 	mux.HandleFunc("/gradio_api/call/synthesize", h)
 	mux.HandleFunc("/gradio_api/call/synthesize/", h)
 	mux.HandleFunc("/gradio_api/file=/tmp/gradio/x/audio.wav", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("RIFF-fake-space-audio"))
+		// PATCH FIX59: serve WAV hợp lệ — chuỗi giờ kiểm chất lượng thật.
+		_, _ = w.Write(fakeSpeechWav())
+	})
+	return srv
+}
+
+// fakeGradioAudio (PATCH FIX59) — fake gradio trả ĐÚNG audio bytes chỉ định
+// (dùng cho test bộ lọc chất lượng: noise / junk / speech).
+func fakeGradioAudio(t *testing.T, calls *atomic.Int32, audio func() []byte) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	h := func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			calls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]string{"event_id": "ev-1"})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: complete\ndata: " +
+			`[{"url":"` + srv.URL + `/audio.wav","meta":{"_type":"gradio.FileData"}}]` + "\n\n"))
+	}
+	mux.HandleFunc("/gradio_api/call/synthesize", h)
+	mux.HandleFunc("/gradio_api/call/synthesize/", h)
+	mux.HandleFunc("/audio.wav", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(audio())
 	})
 	return srv
 }
@@ -101,8 +188,8 @@ func TestVieneuIODemoOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected OK, got %v", err)
 	}
-	if string(res.Audio) != "RIFF-fake-audio" || res.MIME != "audio/wav" || res.VoiceUsed != "Adam Tốp Tốp" {
-		t.Fatalf("unexpected result: %+v", res)
+	if len(res.Audio) < 4 || string(res.Audio[:4]) != "RIFF" || res.MIME != "audio/wav" || res.VoiceUsed != "Adam Tốp Tốp" {
+		t.Fatalf("unexpected result: audio=%dB mime=%s voice=%s", len(res.Audio), res.MIME, res.VoiceUsed)
 	}
 }
 
@@ -127,8 +214,8 @@ func TestGradioTemplateOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected OK, got %v", err)
 	}
-	if string(res.Audio) != "RIFF-fake-space-audio" {
-		t.Fatalf("unexpected audio: %q", res.Audio)
+	if len(res.Audio) < 4 || string(res.Audio[:4]) != "RIFF" {
+		t.Fatalf("unexpected audio: %dB", len(res.Audio))
 	}
 	if !strings.Contains(res.Info, "RTF") {
 		t.Fatalf("expected info from markdown output, got %q", res.Info)
@@ -234,7 +321,8 @@ func TestChainWakeRetry(t *testing.T) {
 	mux.HandleFunc("/gradio_api/call/synthesize", wh)
 	mux.HandleFunc("/gradio_api/call/synthesize/", wh)
 	mux.HandleFunc("/file.wav", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("RIFF-wake-audio"))
+		// PATCH FIX59: serve WAV hợp lệ (chuỗi giờ lọc chất lượng thật)
+		_, _ = w.Write(fakeSpeechWav())
 	})
 
 	c := testChain()
@@ -243,8 +331,8 @@ func TestChainWakeRetry(t *testing.T) {
 	if err != nil || posts.Load() != 2 {
 		t.Fatalf("wake retry should succeed after 1 retry: err=%v posts=%d", err, posts.Load())
 	}
-	if string(res.Audio) != "RIFF-wake-audio" {
-		t.Fatalf("unexpected audio %q", res.Audio)
+	if len(res.Audio) < 4 || string(res.Audio[:4]) != "RIFF" {
+		t.Fatalf("unexpected audio %dB", len(res.Audio))
 	}
 }
 
@@ -288,14 +376,24 @@ func TestRegistryShapeAndVoiceResolve(t *testing.T) {
 	// DevTam05 + hongqminh được NÂNG LÊN ĐẦU chuỗi (probe 2026-09-21).
 	// PATCH FIX57: 13 dịch vụ — thêm hf-nguyenduc1222 (dự phòng cùng họ
 	// hongqminh, cpu-basic; probe 05:04 complete 1,6s).
-	if len(reg) != 13 {
-		t.Fatalf("registry must have exactly 13 providers, got %d", len(reg))
+	// PATCH FIX58: 14 dịch vụ — edge-tts (Microsoft Edge TTS trực tiếp,
+	// miễn phí không giới hạn) đứng ĐẦU chuỗi làm xương sống.
+	// PATCH FIX59: vẫn 14 dịch vụ nhưng hf-nguyenduc1222 DỜI XUỐNG CUỐI
+	// (đang trả audio rè vô nghĩa — probe60 11:02 2026-09-21).
+	if len(reg) != 14 {
+		t.Fatalf("registry must have exactly 14 providers, got %d", len(reg))
 	}
-	if reg[0].ID != "vieneu-io" || reg[1].ID != "hf-devtam05" || reg[2].ID != "hf-hongqminh" {
-		t.Fatalf("wrong head order: %s %s %s", reg[0].ID, reg[1].ID, reg[2].ID)
+	if reg[0].ID != "edge-tts" || reg[0].Kind != "edge" {
+		t.Fatalf("first provider must be edge-tts (kind=edge), got %s/%s", reg[0].ID, reg[0].Kind)
 	}
-	if reg[3].ID != "hf-nguyenduc1222" || reg[4].ID != "hf-pnnbao-ump" || reg[5].ID != "arena-thomcles" {
-		t.Fatalf("wrong order: %s %s %s", reg[3].ID, reg[4].ID, reg[5].ID)
+	if reg[1].ID != "vieneu-io" || reg[2].ID != "hf-devtam05" || reg[3].ID != "hf-hongqminh" {
+		t.Fatalf("wrong head order: %s %s %s", reg[1].ID, reg[2].ID, reg[3].ID)
+	}
+	if reg[4].ID != "hf-pnnbao-ump" || reg[5].ID != "arena-thomcles" {
+		t.Fatalf("wrong order: %s %s", reg[4].ID, reg[5].ID)
+	}
+	if reg[12].ID != "hf-tuananh20015" || reg[13].ID != "hf-nguyenduc1222" {
+		t.Fatalf("tail order wrong (FIX59: nguyenduc1222 cuối chuỗi): %s %s", reg[12].ID, reg[13].ID)
 	}
 	for _, d := range reg {
 		if d.ID == "hf-smrfhdl" {
@@ -305,12 +403,17 @@ func TestRegistryShapeAndVoiceResolve(t *testing.T) {
 	if reg[5].SkipReason == "" {
 		t.Fatalf("arena must carry SkipReason")
 	}
+	// PATCH FIX58: edge-tts khai báo ĐÚNG 2 giọng Việt neural của Edge.
+	eg := reg[0]
+	if len(eg.Voices) != 2 || !eg.HasVoice("Hoài My (Nữ)") || !eg.HasVoice("Nam Minh (Nam)") {
+		t.Fatalf("edge-tts voices wrong: %+v", eg.Voices)
+	}
 	for _, d := range reg {
 		if d.ID == "" || d.Label == "" || d.Base == "" {
 			t.Fatalf("incomplete desc: %+v", d)
 		}
 	}
-	d := Registry()[7] // eagle0019 (FIX57: lùi 1 vị trí vì thêm nguyenduc1222)
+	d := Registry()[7] // eagle0019 (FIX58: lùi 1 vì thêm edge-tts; FIX59 giữ nguyên vị trí 7)
 	if len(d.Voices) == 0 || d.Voices[0].Name == "" {
 		t.Fatalf("eagle0019 must have probed voices")
 	}
@@ -324,7 +427,7 @@ func TestRegistryShapeAndVoiceResolve(t *testing.T) {
 	}
 	// PATCH FIX56: vieneu.io = 10 featured + 23 giọng app − 1 trùng
 	// ("Anh Khôi") = 32; đồng thời Base phải là api.vieneu.io (host mới)
-	vi := Registry()[0]
+	vi := Registry()[1]
 	if len(vi.Voices) != 32 {
 		t.Fatalf("vieneu.io catalog must be 32 (10 featured + 23 app − 1 dup), got %d", len(vi.Voices))
 	}
@@ -456,9 +559,10 @@ func TestChainFilteredAllFailHint(t *testing.T) {
 	if !strings.Contains(err.Error(), "Thái Sơn") || !strings.Contains(err.Error(), "chọn giọng khác") {
 		t.Fatalf("lỗi cuối thiếu gợi ý FIX56: %v", err)
 	}
-	// dịch vụ KHÔNG có giọng không được bị gọi (bộ lọc vẫn hoạt động)
-	if calls.Load() != 1 {
-		t.Fatalf("chỉ được gọi dịch vụ có giọng (1), got %d", calls.Load())
+	// PATCH FIX59: dịch vụ KHÔNG có giọng không được bị gọi (bộ lọc vẫn
+	// hoạt động); tổng request = lượt 1 (1) + lượt thử lại tự động (1) = 2.
+	if calls.Load() != 2 {
+		t.Fatalf("chỉ được gọi dịch vụ có giọng (1 ở lượt 1 + 1 ở lượt thử lại), got %d", calls.Load())
 	}
 }
 
@@ -545,9 +649,13 @@ func TestChainBeginUserRunClearsSkip(t *testing.T) {
 		{ID: "dead", Label: "Dead", Kind: "gradio", Base: srv.URL, API: "synthesize",
 			DataStyle: "template", DefaultVoice: "V"},
 	}
-	// Run 1: lỗi thường → cooldown 5 phút
+	// Run 1: lỗi thường → cooldown 5 phút. PATCH FIX59: 1 chuỗi hỏng =
+	// lượt 1 (1 request) + lượt thử lại tự động (1 request) = 2 request.
 	if _, err1 := c.Synthesize(context.Background(), newHTTP(), Request{Text: "x"}, nil); err1 == nil {
 		t.Fatalf("run 1 phải lỗi")
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("run 1 = 2 request (lượt 1 + lượt thử lại), got %d", calls.Load())
 	}
 	// Run 2: đang cooldown → bị bỏ qua, không request mới ("đã thử 0")
 	before := calls.Load()
@@ -557,13 +665,13 @@ func TestChainBeginUserRunClearsSkip(t *testing.T) {
 	if got := calls.Load() - before; got != 0 {
 		t.Fatalf("run 2 không được gọi thêm (cooldown): + %d", got)
 	}
-	// BeginUserRun (PATCH FIX57) → phải gọi thật trở lại
+	// BeginUserRun (PATCH FIX57) → phải gọi thật trở lại (2 request/run)
 	c.BeginUserRun()
 	if _, err3 := c.Synthesize(context.Background(), newHTTP(), Request{Text: "x"}, nil); err3 == nil {
 		t.Fatalf("run 3 vẫn phải lỗi (fake vẫn error) nhưng phải được GỌI")
 	}
-	if got := calls.Load() - before; got != 1 {
-		t.Fatalf("sau BeginUserRun phải gọi thật thêm đúng 1 lần, got +%d", got)
+	if got := calls.Load() - before; got != 2 {
+		t.Fatalf("sau BeginUserRun phải gọi thật thêm 2 lần (2 lượt), got +%d", got)
 	}
 }
 
@@ -602,5 +710,165 @@ func TestChainVoiceNotAvailNoCooldown(t *testing.T) {
 	_, _ = c.Synthesize(context.Background(), newHTTP(), Request{Text: "x", VoiceName: "Thái Sơn"}, nil)
 	if calls.Load() != 2 {
 		t.Fatalf("lần 2 phải được gọi thật (2 request), got %d", calls.Load())
+	}
+}
+
+// ─── PATCH FIX59: bộ lọc chất lượng audio + lượt thử lại tự động ─────────
+
+// TestChainNoiseAudioSkipped: dịch vụ trả WAV hợp lệ nhưng nội dung NHIỄU
+// TRẮNG (đúng kiểu nguyenduc1222 — thủ phạm "giọng rè rè vô nghĩa") phải
+// bị coi là THẤT BẠI → chuỗi tự nhảy dịch vụ kế, không giao tiếng rè cho
+// người dùng. Audio-rác KHÔNG được thử lại ở lượt 2.
+func TestChainNoiseAudioSkipped(t *testing.T) {
+	oldDelay := RetryPassDelay
+	RetryPassDelay = time.Millisecond
+	defer func() { RetryPassDelay = oldDelay }()
+
+	callsBad := &atomic.Int32{}
+	srvBad := fakeGradioAudio(t, callsBad, fakeNoiseWav)
+	defer srvBad.Close()
+	callsGood := &atomic.Int32{}
+	srvGood := fakeGradioAudio(t, callsGood, fakeSpeechWav)
+	defer srvGood.Close()
+
+	c := testChain()
+	c.reg = []Desc{
+		{ID: "noisy", Label: "Noisy", Kind: "gradio", Base: srvBad.URL, API: "synthesize",
+			DataStyle: "template", DefaultVoice: "V"},
+		{ID: "clean", Label: "Clean", Kind: "gradio", Base: srvGood.URL, API: "synthesize",
+			DataStyle: "template", DefaultVoice: "V"},
+	}
+	var fails []string
+	res, err := c.Synthesize(context.Background(), newHTTP(), Request{Text: "test"}, func(e Event) {
+		if e.Phase == "fail" {
+			fails = append(fails, e.ProviderID+": "+e.Message)
+		}
+	})
+	if err != nil || res.ProviderID != "clean" {
+		t.Fatalf("chuỗi phải bỏ qua dịch vụ rè và thành công qua clean: err=%v provider=%s", err, res.ProviderID)
+	}
+	// PCM đã decode phải được đưa vào Result (không decode lại lần 2)
+	if len(res.Samples) == 0 || res.SR <= 0 {
+		t.Fatalf("Result.Samples/SR phải được điền sau lọc chất lượng (SR=%d)", res.SR)
+	}
+	// fail event phải nói rõ nguyên nhân "rè vô nghĩa"
+	joined := strings.Join(fails, "|")
+	if !strings.Contains(joined, "noisy") || !strings.Contains(joined, "rè vô nghĩa") {
+		t.Fatalf("fail event phải ghi rõ audio rè vô nghĩa: %v", fails)
+	}
+	// trạng thái: noisy = err, clean = ok
+	if st := c.StatusOf("noisy"); st.Status != "err" {
+		t.Fatalf("noisy phải ở trạng thái err: %+v", st)
+	}
+	if c.snap.LastGood != "clean" {
+		t.Fatalf("lastGood phải là clean, got %s", c.snap.LastGood)
+	}
+	// audio-rác KHÔNG vào lượt thử lại: noisy bị gọi đúng 1 lần
+	if callsBad.Load() != 1 {
+		t.Fatalf("dịch vụ trả rè chỉ được gọi 1 lần (không thử lại), got %d", callsBad.Load())
+	}
+	if callsGood.Load() != 1 {
+		t.Fatalf("clean chỉ được gọi 1 lần (thành công lượt 1), got %d", callsGood.Load())
+	}
+}
+
+// TestChainJunkAudioSkipped: byte rác (không phải WAV/MP3) cũng phải bị
+// coi là thất bại của dịch vụ → chuỗi nhảy tiếp, không chết ở bước decode.
+func TestChainJunkAudioSkipped(t *testing.T) {
+	oldDelay := RetryPassDelay
+	RetryPassDelay = time.Millisecond
+	defer func() { RetryPassDelay = oldDelay }()
+
+	junk := []byte("junk-not-audio-at-all")
+	callsBad := &atomic.Int32{}
+	srvBad := fakeGradioAudio(t, callsBad, func() []byte { return junk })
+	defer srvBad.Close()
+	callsGood := &atomic.Int32{}
+	srvGood := fakeGradioAudio(t, callsGood, fakeSpeechWav)
+	defer srvGood.Close()
+
+	c := testChain()
+	c.reg = []Desc{
+		{ID: "junk", Label: "Junk", Kind: "gradio", Base: srvBad.URL, API: "synthesize",
+			DataStyle: "template", DefaultVoice: "V"},
+		{ID: "clean", Label: "Clean", Kind: "gradio", Base: srvGood.URL, API: "synthesize",
+			DataStyle: "template", DefaultVoice: "V"},
+	}
+	res, err := c.Synthesize(context.Background(), newHTTP(), Request{Text: "test"}, nil)
+	if err != nil || res.ProviderID != "clean" {
+		t.Fatalf("byte rác phải bị bỏ qua, thành công qua clean: err=%v provider=%s", err, res.ProviderID)
+	}
+	if callsBad.Load() != 1 {
+		t.Fatalf("junk chỉ được gọi 1 lần (không thử lại), got %d", callsBad.Load())
+	}
+}
+
+// TestChainRetryPassSecondChance (PATCH FIX59): cả lượt 1 thất bại vì lỗi
+// thoáng qua → chuỗi TỰ thử lại 1 lượt; server flaky nhận ở lượt 2.
+// Bằng chứng thực tế (probe58b): cùng space cùng phút, 1 request OK request
+// sau lỗi — 1 lượt thử lại tăng gấp đôi cơ hội trúng cửa sổ hồi phục.
+func TestChainRetryPassSecondChance(t *testing.T) {
+	oldDelay := RetryPassDelay
+	RetryPassDelay = time.Millisecond
+	defer func() { RetryPassDelay = oldDelay }()
+
+	var posts atomic.Int32
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	wh := func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			n := posts.Add(1)
+			if n <= 2 { // lượt 1: p1 và p2 đều lỗi
+				_ = json.NewEncoder(w).Encode(map[string]string{"event_id": "ev-err"})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"event_id": "ev-ok"})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if strings.HasSuffix(r.URL.Path, "ev-err") {
+			_, _ = w.Write([]byte("event: error\ndata: null\n\n"))
+			return
+		}
+		_, _ = w.Write([]byte("event: complete\ndata: " +
+			`[{"url":"` + srv.URL + `/audio.wav","meta":{"_type":"gradio.FileData"}}]` + "\n\n"))
+	}
+	mux.HandleFunc("/gradio_api/call/synthesize", wh)
+	mux.HandleFunc("/gradio_api/call/synthesize/", wh)
+	mux.HandleFunc("/audio.wav", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(fakeSpeechWav())
+	})
+
+	c := testChain()
+	c.reg = []Desc{
+		{ID: "p1", Label: "P1", Kind: "gradio", Base: srv.URL, API: "synthesize",
+			DataStyle: "template", DefaultVoice: "V"},
+		{ID: "p2", Label: "P2", Kind: "gradio", Base: srv.URL, API: "synthesize",
+			DataStyle: "template", DefaultVoice: "V"},
+	}
+	var infos []string
+	res, err := c.Synthesize(context.Background(), newHTTP(), Request{Text: "test"}, func(e Event) {
+		if e.Phase == "info" {
+			infos = append(infos, e.Message)
+		}
+	})
+	if err != nil || res.ProviderID != "p1" {
+		t.Fatalf("lượt 2 phải cứu được chuỗi qua p1: err=%v provider=%s", err, res.ProviderID)
+	}
+	if res.Tried != 3 { // 2 lượt 1 + 1 lượt 2 (p1 nhận đầu tiên)
+		t.Fatalf("tried phải là 3 (2 lượt 1 + p1 lượt 2), got %d", res.Tried)
+	}
+	if posts.Load() != 3 {
+		t.Fatalf("tổng POST phải là 3, got %d", posts.Load())
+	}
+	found := false
+	for _, m := range infos {
+		if strings.Contains(m, "thử lại") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("thiếu event info lượt thử lại: %v", infos)
 	}
 }

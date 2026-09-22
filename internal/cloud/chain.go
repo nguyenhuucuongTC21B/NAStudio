@@ -3,10 +3,13 @@ package cloud
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
 	"time"
+
+	"hcstudio/internal/dsp"
 )
 
 // PState trạng thái runtime của 1 dịch vụ trong chuỗi.
@@ -25,6 +28,38 @@ type PState struct {
 type Snapshot struct {
 	Providers map[string]*PState `json:"providers"`
 	LastGood  string             `json:"lastGood,omitempty"`
+}
+
+// badAudioErr — PATCH FIX59: sentinel audio RÁC từ dịch vụ (nhiễu trắng
+// vô nghĩa hoặc byte không decode được). Đây là THẤT BẠI của dịch vụ đó:
+// chuỗi phải nhảy dịch vụ kế tiếp thay vì giao tiếng rè cho người dùng.
+// Không rơi vào cooldown "giọng chưa có" và KHÔNG được thử lại ở lượt 2
+// (model hỏng trên server là lỗi kéo dài, thử lại chỉ tốn thời gian).
+type badAudioErr struct{ msg string }
+
+func (e *badAudioErr) Error() string { return e.msg }
+
+// IsBadAudio kiểm tra lỗi có phải dạng "audio rè/rác" không.
+func IsBadAudio(err error) bool {
+	var b *badAudioErr
+	return errors.As(err, &b)
+}
+
+// verifyAudio (PATCH FIX59) — decode + lọc chất lượng NGAY trong chuỗi.
+// Bằng chứng thủ phạm: probe60 11:02 2026-09-21 — nguyenduc1222 trả WAV
+// hợp lệ 24kHz/3.0s nhưng nội dung nhiễu trắng thuần (rms_cv 0.01,
+// pause 0%, zcr 0.50; giọng thật: 0.67-0.99 / 20-41% / 0.05-0.11).
+// Audio qua vòng lọc được ghi Samples/SR vào Result để tái sử dụng.
+func verifyAudio(res *Result) error {
+	samples, sr, _, err := dsp.ReadAudioBytes(res.Audio, ".wav")
+	if err != nil {
+		return &badAudioErr{msg: "trả audio không đọc được (byte rác)"}
+	}
+	if dsp.LooksLikeNoise(samples, sr) {
+		return &badAudioErr{msg: "trả audio rè vô nghĩa (nhiễu trắng — model hỏng trên server)"}
+	}
+	res.Samples, res.SR = samples, sr
+	return nil
 }
 
 // Chain chuỗi cầu nối có nhớ trạng thái.
@@ -171,6 +206,9 @@ func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv
 	started := time.Now()
 	tried := 0
 	var lastErr error
+	// PATCH FIX59: các dịch vụ vừa CHẬP CHỜN (lỗi thoáng qua) của lượt 1 —
+	// ứng viên cho lượt thử lại tự động khi cả lượt 1 thất bại.
+	var transient []Desc
 
 	for i, d := range reg {
 		if ctx.Err() != nil {
@@ -224,6 +262,11 @@ func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv
 					Message: msg, Pct: creep, ElapsedSec: time.Since(started).Seconds()})
 			}
 		})
+		if err == nil {
+			// PATCH FIX59: kiểm chất lượng audio NGAY TẠI CHUỖI — audio
+			// rè/rác = thất bại của dịch vụ này, tự nhảy dịch vụ kế.
+			err = verifyAudio(&res)
+		}
 
 		if err == nil {
 			c.mu.Lock()
@@ -281,6 +324,10 @@ func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv
 			}
 			res, err = callProvider(ctx, hc, d, r, nil)
 			if err == nil {
+				// PATCH FIX59: cả kết quả đánh thức cũng phải qua lọc chất lượng.
+				err = verifyAudio(&res)
+			}
+			if err == nil {
 				c.mu.Lock()
 				st := c.state(d.ID)
 				st.Status, st.Err, st.CooldownUntil, st.CountToday = "ok", "", 0, st.CountToday+1
@@ -303,6 +350,67 @@ func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv
 		emitEv(onEv, Event{Phase: "fail", ProviderID: d.ID, Label: d.Label,
 			Message: d.Label + " lỗi: " + err.Error() + " — chuyển dịch vụ kế tiếp.",
 			Pct:     basePct + 4, ElapsedSec: time.Since(started).Seconds()})
+		// PATCH FIX59: lỗi thoáng qua (không phải audio-rác) → ứng viên
+		// thử lại ở lượt 2 (space ZeroGPU chập chờn THEO TỪNG REQUEST —
+		// probe58b: cùng space cùng phút, Mai Anh OK 2,8s trong khi
+		// Quang Sơn + Ngọc Trân error 0,7s).
+		if !IsBadAudio(err) {
+			transient = append(transient, d)
+		}
+	}
+
+	// ── PATCH FIX59: LƯỢT THỬ LẠI TỰ ĐỘNG ────────────────────────────
+	// Người dùng báo "tất cả giọng OD không dùng được" xảy ra khi CẢ nhóm
+	// space chập chờn rơi vào cửa sổ lỗi đúng lúc chạy chuỗi — nhưng cùng
+	// những server đó vài phút trước/vài request sau lại OK (probe58b,
+	// probe60: eagle0019 25s OK lúc 11:02 sau khi error cả sáng). Vậy
+	// trước khi trả lỗi cho người dùng, tự thử lại MỘT lượt các server
+	// vừa lỗi thoáng qua (kèm trễ ngắn giữa lần gọi — không dồn dập).
+	// Audio-rác KHÔNG được thử lại (lỗi kéo dài, cố tình bỏ).
+	if len(transient) > 0 && ctx.Err() == nil {
+		if len(transient) > maxRetryPass {
+			transient = transient[:maxRetryPass] // giữ thứ tự ưu tiên đầu chuỗi
+		}
+		emitEv(onEv, Event{Phase: "info", Label: r.VoiceName,
+			Message: fmt.Sprintf("Không dịch vụ nào nhận được ở lượt 1 — tự động thử lại %d server vừa chập chờn…", len(transient)),
+			Pct:     45, ElapsedSec: time.Since(started).Seconds()})
+		for _, d := range transient {
+			if ctx.Err() != nil {
+				return Result{}, ctx.Err()
+			}
+			select {
+			case <-time.After(RetryPassDelay):
+			case <-ctx.Done():
+				return Result{}, ctx.Err()
+			}
+			tried++
+			emitEv(onEv, Event{Phase: "trying", ProviderID: d.ID, Label: d.Label,
+				Message: "Đang thử lại " + d.Label + "…",
+				Pct:     46, ElapsedSec: time.Since(started).Seconds()})
+			res, err := callProvider(ctx, hc, d, r, nil)
+			if err == nil {
+				err = verifyAudio(&res)
+			}
+			if err == nil {
+				c.mu.Lock()
+				st := c.state(d.ID)
+				st.Status, st.Err, st.CooldownUntil = "ok", "", 0
+				st.CountToday++
+				st.LastOKAt = c.nowFn().Format("15:04:05")
+				c.snap.LastGood = d.ID
+				c.mu.Unlock()
+				res.Tried = tried
+				res.DurationSec = 0
+				emitEv(onEv, Event{Phase: "done", ProviderID: d.ID, Label: d.Label,
+					Message: "Thành công qua " + d.Label + " (ở lượt thử lại)", Pct: 92,
+					ElapsedSec: time.Since(started).Seconds()})
+				return res, nil
+			}
+			lastErr = err
+			emitEv(onEv, Event{Phase: "fail", ProviderID: d.ID, Label: d.Label,
+				Message: "Thử lại " + d.Label + " vẫn lỗi: " + err.Error(),
+				Pct:     47, ElapsedSec: time.Since(started).Seconds()})
+		}
 	}
 
 	if lastErr == nil {
@@ -322,6 +430,9 @@ func (c *Chain) Synthesize(ctx context.Context, hc *http.Client, r Request, onEv
 
 func callProvider(ctx context.Context, hc *http.Client, d Desc, r Request, onEv func(gradioEvent)) (Result, error) {
 	switch d.Kind {
+	case "edge":
+		// PATCH FIX58: Microsoft Edge TTS trực tiếp (websocket).
+		return synthEdge(ctx, hc, d, r)
 	case "vieneuio":
 		return synthVieneuIO(ctx, hc, d, r)
 	case "gradio":

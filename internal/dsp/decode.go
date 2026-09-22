@@ -1,6 +1,7 @@
 package dsp
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -23,39 +24,44 @@ import (
 // go-mp3 v0.3.4 luôn xuất PCM16 stereo interleaved kể cả nguồn mono →
 // trộn (L+R)/2 về mono float32 để khớp pipeline của app.
 func ReadAudioFile(path string) ([]float32, int, int, error) {
-	f, err := os.Open(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	defer f.Close()
-	head := make([]byte, 4)
-	n, _ := io.ReadFull(f, head)
-	if n >= 4 && string(head[:4]) == "RIFF" {
-		_ = f.Close()
-		return ReadWav(path)
-	}
-	_ = f.Close()
-	if n >= 3 && string(head[:3]) == "ID3" {
-		return readMP3(path)
-	}
-	if n >= 2 && head[0] == 0xFF && (head[1]&0xE0) == 0xE0 {
-		return readMP3(path)
-	}
-	// không nhận dạng được — thử WAV cho khớp hành vi cũ (đủ tên .wav)
-	if strings.EqualFold(filepath.Ext(path), ".wav") {
-		return ReadWav(path)
-	}
-	return nil, 0, 0, fmt.Errorf("định dạng audio không nhận dạng được (head=% x)", head[:n])
+	return ReadAudioBytes(raw, filepath.Ext(path))
 }
 
-// readMP3 giải mã MP3 → mono float32 + sampleRate + channels(=1).
-func readMP3(path string) ([]float32, int, int, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, 0, 0, err
+// PATCH FIX59 — ReadAudioBytes: như ReadAudioFile nhưng làm việc trên
+// BỘ NHỚ. Chuỗi online dùng bản này để kiểm tra chất lượng audio NGAY khi
+// nhận về (audio rè/rác phải bị coi là thất bại của dịch vụ đó và tự nhảy
+// dịch vụ kế tiếp — không chờ tới bước phát mới phát hiện). ext chỉ dùng
+// làm gợi ý dự phòng khi không nhận dạng được magic bytes (".wav").
+func ReadAudioBytes(b []byte, ext string) ([]float32, int, int, error) {
+	if len(b) >= 4 && string(b[:4]) == "RIFF" {
+		return readWavBytes(b)
 	}
-	defer f.Close()
-	dec, err := mp3dec.NewDecoder(f)
+	if len(b) >= 3 && string(b[:3]) == "ID3" {
+		return readMP3From(bytes.NewReader(b))
+	}
+	if len(b) >= 2 && b[0] == 0xFF && (b[1]&0xE0) == 0xE0 {
+		return readMP3From(bytes.NewReader(b))
+	}
+	// không nhận dạng được — thử WAV cho khớp hành vi cũ (đủ tên .wav)
+	if strings.EqualFold(ext, ".wav") {
+		return readWavBytes(b)
+	}
+	head := b
+	if len(head) > 4 {
+		head = head[:4]
+	}
+	return nil, 0, 0, fmt.Errorf("định dạng audio không nhận dạng được (head=% x)", head)
+}
+
+// readMP3From giải mã MP3 từ stream → mono float32 + sampleRate.
+// (FIX59: tách từ readMP3 để decode được cả từ bộ nhớ — bytes.Reader
+// cũng là io.Seeker nên go-mp3 hoạt động như với file.)
+func readMP3From(r io.Reader) ([]float32, int, int, error) {
+	dec, err := mp3dec.NewDecoder(r)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("mở MP3 lỗi: %w", err)
 	}
@@ -75,4 +81,14 @@ func readMP3(path string) ([]float32, int, int, error) {
 		sr = 44100
 	}
 	return out, sr, 1, nil
+}
+
+// readMP3 (giữ cho tương thích nội bộ) — giải mã MP3 từ file.
+func readMP3(path string) ([]float32, int, int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer f.Close()
+	return readMP3From(f)
 }

@@ -40,7 +40,7 @@
     // PATCH FIX53: chế độ sử dụng online (cầu nối chuyển tiếp)
     mode: "offline",          // offline | online
     cloudVoice: "",           // "" = giọng mặc định từng dịch vụ
-    cloudProviders: [],       // bảng dịch vụ online + trạng thái (13 từ FIX57 — thêm nguyenduc1222)
+    cloudProviders: [],       // bảng dịch vụ online + trạng thái (14 — FIX59: nguyenduc1222 cuối, lọc audio rè)
     cloudVoiceOptions: [],    // gộp catalog giọng của các dịch vụ
     cloudOD: [],              // PATCH FIX55: 8 giọng ổn định (từ backend)
     cloudODOnly: false,       // PATCH FIX55: checkbox "Chỉ giọng OD" (session)
